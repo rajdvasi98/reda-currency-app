@@ -115,13 +115,13 @@ router.post('/compliance', (req, res) => {
       if (shopRow) {
         db.prepare('DELETE FROM shops WHERE id = ?').run(shopRow.id);
       }
-    } catch {}
+    } catch (err) { console.error(`[Webhook] compliance/shop/redact error:`, err.message); }
   } else if (topic === 'customers/redact' || topic === 'customers/data_request') {
     try {
       db.prepare(
         'INSERT INTO gdpr_requests (shop_domain, topic, payload) VALUES (?, ?, ?)'
       ).run(shop, topic, JSON.stringify(req.body));
-    } catch {}
+    } catch (err) { console.error(`[Webhook] compliance/${topic} error:`, err.message); }
   }
 
   res.status(200).json({ ok: true });

@@ -4,6 +4,7 @@ dist/
 
 # Environment — never commit real credentials
 .env
+.env.*
 
 # SQLite database and WAL files
 *.sqlite

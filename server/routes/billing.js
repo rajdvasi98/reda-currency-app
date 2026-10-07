@@ -88,7 +88,8 @@ router.post('/subscribe', async (req, res) => {
 
     res.json({ confirmationUrl: result.confirmationUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[Billing] subscribe error:', err.message);
+    res.status(500).json({ error: 'Failed to create subscription' });
   }
 });
 
@@ -133,8 +134,8 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=0`);
     }
   } catch (err) {
-    console.error('Billing callback error:', err);
-    res.status(500).send(`Billing error: ${err.message}`);
+    console.error('[Billing] callback error:', err.message);
+    res.status(500).send('Billing error — please try again');
   }
 });
 

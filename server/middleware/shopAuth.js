@@ -5,20 +5,15 @@ import { getDb } from '../database/init.js';
  * Attaches req.shopRow and req.shopId for downstream route use.
  */
 export function requireShopAuth(req, res, next) {
-  const shop = req.query.shop || req.headers['x-shopify-shop-domain'] || req.body?.shop;
-
-  if (!shop) {
-    return res.status(401).json({ error: 'Missing shop domain' });
+  if (!req.shopAuthenticated || !req.shopDomain) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const db = getDb();
-  const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ? AND is_active = 1').get(shop);
+  const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ? AND is_active = 1').get(req.shopDomain);
 
   if (!shopRow) {
-    return res.status(401).json({
-      error: 'Shop not installed',
-      installUrl: `/api/auth/install?shop=${shop}`,
-    });
+    return res.status(401).json({ error: 'Shop not installed' });
   }
 
   req.shopRow = shopRow;

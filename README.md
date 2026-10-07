@@ -42,7 +42,6 @@ Multi Currency Converter
 │       ├── exchangeRate.js  # Rate fetch + store (with fallback API)
 │       ├── priceConverter.js# Price conversion + rounding + rule application
 │       ├── geolocation.js   # IP → country (ip-api.com + ipapi.co fallback)
-│       ├── scriptTag.js     # Install/remove Shopify script tags
 │       ├── billing.js       # Shopify App Subscription API helpers
 │       └── tokenRefresh.js  # Refresh expiring offline access tokens
 ├── client/                  # React admin UI (Vite)
@@ -96,7 +95,7 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 SHOPIFY_API_KEY=your_api_key
 SHOPIFY_API_SECRET=your_api_secret
-SCOPES=read_products,read_script_tags,write_script_tags
+SCOPES=read_products
 HOST=https://your-tunnel-or-domain.com
 PORT=3000
 SQLITE_PATH=./database.sqlite

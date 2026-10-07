@@ -32,13 +32,26 @@ app.set('trust proxy', true);
 app.use('/api/webhooks', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json());
 app.use(cookieParser());
-app.use(cors({ origin: (origin, cb) => cb(null, true), credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const allowed = origin.endsWith('.myshopify.com')
+      || origin.endsWith('.shopify.com')
+      || origin === HOST
+      || origin === `http://localhost:${PORT}`;
+    cb(null, allowed);
+  },
+  credentials: true,
+}));
 
 // Security headers
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'ALLOWALL'); // Shopify embeds in iframe
+  res.setHeader('Content-Security-Policy', "frame-ancestors https://*.myshopify.com https://admin.shopify.com;");
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  }
   next();
 });
 
@@ -193,7 +206,7 @@ app.get('/', (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('[Error]', req.method, req.path, err.message);
-  res.status(500).json({ error: err.message || 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, () => {

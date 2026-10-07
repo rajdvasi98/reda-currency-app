@@ -108,8 +108,8 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
     // Redirect to embedded app
     res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`);
   } catch (err) {
-    console.error('OAuth callback error:', err);
-    res.status(500).send(`Installation failed: ${err.message}`);
+    console.error('[Auth] OAuth callback error:', err.message);
+    res.status(500).send('Installation failed — please try again');
   }
 });
 

@@ -42,16 +42,17 @@ export function resolveShop(req, res, next) {
     const token = authHeader.slice(7);
     const claims = verifySessionToken(token);
     if (claims && claims.dest) {
-      // dest is "https://{shop}" — extract hostname
       try {
         req.shopDomain = new URL(claims.dest).hostname;
+        req.shopAuthenticated = true;
       } catch {
-        req.shopDomain = req.headers['x-shopify-shop-domain'] || req.query.shop || '';
+        req.shopDomain = '';
+        req.shopAuthenticated = false;
       }
       return next();
     }
   }
-  // Fall back to shop-domain header or query param
-  req.shopDomain = req.headers['x-shopify-shop-domain'] || req.query.shop || '';
+  req.shopDomain = req.query.shop || '';
+  req.shopAuthenticated = false;
   next();
 }
