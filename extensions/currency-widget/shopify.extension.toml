@@ -3,4 +3,5 @@ api_version = "2024-01"
 [[extensions]]
 name = "Multi Currency Widget"
 handle = "currency-widget"
+uid = "9e150e08-d615-55b3-790a-f02a314860bb0b28375b"
 type = "theme"

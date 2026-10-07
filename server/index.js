@@ -117,7 +117,7 @@ app.get('/privacy', (req, res) => {
   <ul>
     <li>Authenticate API requests to Shopify on your behalf</li>
     <li>Store your app configuration (countries, currencies, pricing rules)</li>
-    <li>Register and manage storefront script tags</li>
+    <li>Display currency conversion on your storefront</li>
   </ul>
 
   <h2>3. Data Sharing</h2>
@@ -188,70 +188,6 @@ app.get('/', (req, res) => {
       </body>
     </html>
   `);
-});
-
-// Temporary: enable App Embed block on a store's active theme (protected by API secret)
-// Remove this endpoint after testing.
-app.get('/api/admin/enable-embed', async (req, res) => {
-  const { shop, secret, theme_id } = req.query;
-  if (secret !== process.env.SHOPIFY_API_SECRET) return res.status(403).json({ error: 'Forbidden' });
-  if (!shop || !theme_id) return res.status(400).json({ error: 'Missing shop or theme_id' });
-
-  try {
-    const db = getDb();
-    const row = db.prepare('SELECT access_token FROM shops WHERE shop_domain = ?').get(shop);
-    if (!row?.access_token) return res.status(404).json({ error: 'Shop not installed' });
-
-    const BASE = `https://${shop}/admin/api/2024-01`;
-    const HEADERS = { 'X-Shopify-Access-Token': row.access_token, 'Content-Type': 'application/json' };
-
-    // Fetch current settings_data.json
-    const getRes = await fetch(`${BASE}/themes/${theme_id}/assets.json?asset[key]=config/settings_data.json`, { headers: HEADERS });
-    if (!getRes.ok) {
-      const txt = await getRes.text();
-      return res.status(502).json({ error: `Shopify GET failed: ${getRes.status}`, detail: txt.substring(0, 300) });
-    }
-    const assetJson = await getRes.json();
-    const settings = JSON.parse(assetJson.asset?.value || '{}');
-
-    if (!settings.current) settings.current = {};
-    if (!settings.current.blocks) settings.current.blocks = {};
-
-    // Block type: shopify://apps/{app-handle}/blocks/{extension-handle}/{uuid}
-    const BLOCK_TYPE = 'shopify://apps/multi-currency-converter-4/blocks/currency-widget/9e150e08-d615-55b3-790a-f02a314860bb';
-    const KEY = 'multicurrency_embed_' + Date.now();
-
-    // Check if already enabled
-    const existing = Object.entries(settings.current.blocks).find(([, v]) => v.type && v.type.includes('currency-widget'));
-    if (existing) {
-      return res.json({ status: 'already_enabled', block_key: existing[0], block_type: existing[1].type });
-    }
-
-    settings.current.blocks[KEY] = { type: BLOCK_TYPE, disabled: false, settings: {} };
-
-    const putRes = await fetch(`${BASE}/themes/${theme_id}/assets.json`, {
-      method: 'PUT',
-      headers: HEADERS,
-      body: JSON.stringify({ asset: { key: 'config/settings_data.json', value: JSON.stringify(settings, null, 2) } })
-    });
-
-    const putJson = await putRes.json();
-    if (!putRes.ok) return res.status(502).json({ error: `Shopify PUT failed: ${putRes.status}`, detail: putJson });
-
-    // Verify
-    const verifyRes = await fetch(`${BASE}/themes/${theme_id}/assets.json?asset[key]=config/settings_data.json`, { headers: HEADERS });
-    const verifyJson = await verifyRes.json();
-    const verified = JSON.parse(verifyJson.asset?.value || '{}');
-
-    res.json({
-      status: 'done',
-      block_type_attempted: BLOCK_TYPE,
-      blocks_after: verified.current?.blocks,
-      updated_at: putJson.asset?.updated_at
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // Global error handler

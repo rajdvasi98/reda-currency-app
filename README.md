@@ -1,6 +1,6 @@
 # 💱 Multi Currency Converter — Shopify App
 
-A Shopify App Store app that lets merchants sell in multiple currencies. Built by [REDA](https://reda.one).
+A Shopify App Store app that lets merchants sell in multiple currencies.
 
 ## Features
 
@@ -17,7 +17,7 @@ A Shopify App Store app that lets merchants sell in multiple currencies. Built b
 ## Architecture
 
 ```
-REDA Currency App
+Multi Currency Converter
 ├── server/                  # Express.js backend (Node.js, ES modules)
 │   ├── index.js             # App entry point, middleware setup
 │   ├── database/
@@ -83,8 +83,8 @@ REDA Currency App
 ### Installation
 
 ```bash
-git clone https://github.com/vaynoxstudio/reda-currency-app.git
-cd reda-currency-app
+git clone https://github.com/vaynoxstudio/multi-currency-app.git
+cd multi-currency-app
 npm install
 npm run build:client
 ```
@@ -163,4 +163,4 @@ This app implements all mandatory requirements for Shopify App Store listing:
 
 ## License
 
-MIT — © 2026 REDA / Vaynox Studio
+MIT — © 2026 Vaynox Studio

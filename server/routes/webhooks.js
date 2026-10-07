@@ -16,7 +16,7 @@ router.use(verifyWebhookHmac);
 
 /**
  * POST /api/webhooks/app/uninstalled
- * Mark shop as inactive, remove script tags.
+ * Mark shop as inactive.
  */
 router.post('/app/uninstalled', async (req, res) => {
   const shop = req.headers['x-shopify-shop-domain'];
