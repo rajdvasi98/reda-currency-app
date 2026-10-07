@@ -1,0 +1,10 @@
+file 'C:/Application/REDA currency apps/assets/screenshots-resized/feature-1600x900.jpg'
+duration 40
+file 'C:/Application/REDA currency apps/assets/screenshots-resized/01-dashboard-1600x900.jpg'
+duration 80
+file 'C:/Application/REDA currency apps/assets/screenshots-resized/02-countries-1600x900.jpg'
+duration 80
+file 'C:/Application/REDA currency apps/assets/screenshots-resized/03-exchange-rates-1600x900.jpg'
+duration 80
+file 'C:/Application/REDA currency apps/assets/screenshots-resized/03-exchange-rates-1600x900.jpg'
+duration 5

@@ -1,0 +1,32 @@
+node_modules/
+dist/
+.DS_Store
+
+# Environment — never commit real credentials
+.env
+
+# SQLite database and WAL files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs
+*.log
+*.err
+npm-debug.log*
+tunnel_out.txt
+tunnel_err.txt
+
+# Tunnel binaries and temp scripts
+ngrok.exe
+ngrok
+run-tunnel.js
+test-tunnel.js
+tunnel-url.txt
+
+# One-off dev/demo scripts
+seed_demo.mjs
+create-demo.js
+
+# Claude session data
+.claude/
