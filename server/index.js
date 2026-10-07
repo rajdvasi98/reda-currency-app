@@ -4,8 +4,9 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDb } from './database/init.js';
+import { initDb, getDb } from './database/init.js';
 import authRoutes from './routes/auth.js';
+import { resolveShop } from './middleware/sessionToken.js';
 import countriesRoutes from './routes/countries.js';
 import currenciesRoutes from './routes/currencies.js';
 import exchangeRatesRoutes from './routes/exchangeRates.js';
@@ -60,6 +61,9 @@ app.use('/admin', express.static(join(__dirname, '../dist/client')));
 
 // Webhooks (raw body needed — registered before JSON middleware)
 app.use('/api/webhooks', webhookRoutes);
+
+// Resolve shop identity from session token or headers for all API routes
+app.use('/api', resolveShop);
 
 // API routes (all JSON)
 app.use('/api/auth', authRoutes);
@@ -145,7 +149,7 @@ app.get('/privacy', (req, res) => {
 </html>`);
 });
 
-// SPA fallback for embedded admin (both /admin and /app paths)
+// SPA fallback for embedded admin
 const adminFallback = (req, res) => {
   const indexPath = join(__dirname, '../dist/client/index.html');
   res.sendFile(indexPath, (err) => {
@@ -153,7 +157,21 @@ const adminFallback = (req, res) => {
   });
 };
 app.get('/admin', adminFallback);
-app.get('/app*', adminFallback);
+
+// Embedded app entry point — redirect to OAuth if shop is not installed
+app.get('/app*', (req, res) => {
+  const shop = req.query.shop;
+  if (shop) {
+    try {
+      const db = getDb();
+      const shopRow = db.prepare('SELECT is_active FROM shops WHERE shop_domain = ?').get(shop);
+      if (!shopRow || !shopRow.is_active) {
+        return res.redirect(`/api/auth/install?shop=${encodeURIComponent(shop)}`);
+      }
+    } catch {}
+  }
+  adminFallback(req, res);
+});
 
 // Root install redirect
 app.get('/', (req, res) => {

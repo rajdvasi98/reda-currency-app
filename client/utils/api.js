@@ -1,12 +1,24 @@
-const shop = new URLSearchParams(window.location.search).get('shop') || '';
+const params = new URLSearchParams(window.location.search);
+const shop = params.get('shop') || '';
+
+async function getSessionToken() {
+  if (window.shopify) {
+    try {
+      return await window.shopify.idToken();
+    } catch {}
+  }
+  return null;
+}
 
 async function apiFetch(path, options = {}) {
+  const token = await getSessionToken();
   const url = path.includes('?') ? `${path}&shop=${shop}` : `${path}?shop=${shop}`;
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       'X-Shopify-Shop-Domain': shop,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -41,7 +53,6 @@ export const api = {
   getSettings: () => apiFetch('/api/settings'),
   updateSettings: (data) => apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
-  // Billing
   getPlans: () => apiFetch('/api/billing/plans'),
   getSubscription: () => apiFetch('/api/billing/subscription'),
   subscribe: (plan) => apiFetch('/api/billing/subscribe', { method: 'POST', body: JSON.stringify({ plan }) }),

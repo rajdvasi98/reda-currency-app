@@ -1,0 +1,25 @@
+# Shopify app configuration
+# https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "Multi Currency Converter"
+client_id = "fcdbdc4e7b0cb086cfe38cd5f7ac5e7c"
+application_url = "https://757d2473e86a8e.lhr.life/app"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,read_script_tags,write_script_tags"
+
+[auth]
+redirect_urls = [
+  "https://757d2473e86a8e.lhr.life/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "https://757d2473e86a8e.lhr.life/api/webhooks/compliance"
+
+[pos]
+embedded = false

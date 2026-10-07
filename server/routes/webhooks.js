@@ -100,6 +100,39 @@ router.post('/customers/data_request', (req, res) => {
 });
 
 /**
+ * POST /api/webhooks/compliance
+ * Single endpoint for all three GDPR compliance topics (configured via shopify.app.toml).
+ * Shopify routes customers/data_request, customers/redact, and shop/redact here.
+ */
+router.post('/compliance', (req, res) => {
+  const shop = req.headers['x-shopify-shop-domain'];
+  const topic = req.headers['x-shopify-topic'];
+  console.log(`[Webhook] compliance/${topic}: ${shop}`);
+
+  const db = getDb();
+
+  if (topic === 'shop/redact') {
+    try {
+      db.prepare(
+        "INSERT INTO gdpr_requests (shop_domain, topic, payload) VALUES (?, 'shop/redact', ?)"
+      ).run(shop, JSON.stringify(req.body));
+      const shopRow = db.prepare('SELECT id FROM shops WHERE shop_domain = ?').get(shop);
+      if (shopRow) {
+        db.prepare('DELETE FROM shops WHERE id = ?').run(shopRow.id);
+      }
+    } catch {}
+  } else if (topic === 'customers/redact' || topic === 'customers/data_request') {
+    try {
+      db.prepare(
+        'INSERT INTO gdpr_requests (shop_domain, topic, payload) VALUES (?, ?, ?)'
+      ).run(shop, topic, JSON.stringify(req.body));
+    } catch {}
+  }
+
+  res.status(200).json({ ok: true });
+});
+
+/**
  * POST /api/webhooks/app_subscriptions/update
  * Billing status change — keep local subscription table in sync.
  */
