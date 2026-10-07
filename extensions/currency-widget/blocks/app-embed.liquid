@@ -1,0 +1,17 @@
+{% comment %}
+  Multi Currency Converter — App Embed Block
+  Enables the currency selector widget on the storefront.
+  Merchants activate this once in Online Store > Themes > Customize > App Embeds.
+{% endcomment %}
+
+<script>
+  window.MULTICURRENCY_APP_HOST = "https://reda-currency-app.onrender.com";
+</script>
+{{ 'currency-widget.js' | asset_url | script_tag }}
+
+{% schema %}
+{
+  "name": "Multi Currency Converter",
+  "target": "body"
+}
+{% endschema %}

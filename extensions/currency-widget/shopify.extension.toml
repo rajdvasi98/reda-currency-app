@@ -1,0 +1,6 @@
+api_version = "2024-01"
+
+[[extensions]]
+name = "Multi Currency Widget"
+handle = "currency-widget"
+type = "theme"

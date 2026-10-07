@@ -8,7 +8,6 @@
 import { Router } from 'express';
 import { getDb } from '../database/init.js';
 import { verifyWebhookHmac } from '../middleware/hmac.js';
-import { removeScriptTags } from '../services/scriptTag.js';
 
 const router = Router();
 
@@ -31,10 +30,6 @@ router.post('/app/uninstalled', async (req, res) => {
       'UPDATE shops SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE shop_domain = ?'
     ).run(shop);
 
-    // Attempt to clean up script tags (may fail if token already revoked)
-    try {
-      await removeScriptTags(shop, shopRow.access_token, process.env.HOST);
-    } catch {}
   }
 
   res.status(200).json({ ok: true });

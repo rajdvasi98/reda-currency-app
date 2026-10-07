@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { getDb } from '../database/init.js';
-import { installScriptTag } from '../services/scriptTag.js';
 import { fetchAndStoreRates } from '../services/exchangeRate.js';
 import { defaultCountries } from '../database/seeds.js';
 import { verifyOAuthHmac, validateShopDomain } from '../middleware/hmac.js';
@@ -102,9 +101,6 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
 
     // Fetch initial exchange rates
     await fetchAndStoreRates(shopId, defaultCurrency);
-
-    // Install storefront script tag
-    await installScriptTag(shop, access_token, process.env.HOST);
 
     // Clear CSRF cookie
     res.clearCookie('shopify_oauth_state');
