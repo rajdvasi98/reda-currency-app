@@ -4,7 +4,6 @@
  * Fallback: exchangerate.host (in case primary is down).
  * Rates are stored per-shop so each merchant can override individual pairs manually.
  */
-import fetch from 'node-fetch';
 import { dbGet, dbAll, dbRun } from '../database/init.js';
 
 const EXCHANGE_RATE_API = process.env.EXCHANGE_RATE_API_URL || 'https://open.er-api.com/v6/latest';

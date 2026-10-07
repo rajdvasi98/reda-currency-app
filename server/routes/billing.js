@@ -2,8 +2,56 @@ import { Router } from 'express';
 import { dbGet, dbRun } from '../database/init.js';
 import { requireShopAuth } from '../middleware/shopAuth.js';
 import { createSubscription, getActiveSubscription, cancelSubscription, PLANS } from '../services/billing.js';
+import { validateShopDomain } from '../middleware/hmac.js';
 
 const router = Router();
+
+/**
+ * GET /api/billing/callback — Shopify redirects here after merchant approves/declines
+ * Must be BEFORE requireShopAuth because this is a browser redirect with no Bearer token.
+ */
+router.get('/callback', async (req, res) => {
+  const { shop, plan, charge_id } = req.query;
+  if (!shop) return res.status(400).send('Missing shop');
+  if (!validateShopDomain(shop)) return res.status(400).send('Invalid shop domain');
+
+  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1', [shop]);
+  if (!shopRow) return res.status(404).send('Shop not found');
+
+  try {
+    const live = await getActiveSubscription(shop, shopRow.access_token);
+
+    if (live && (live.status === 'ACTIVE' || live.status === 'PENDING')) {
+      await dbRun(`
+        INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id, current_period_end)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT(shop_id) DO UPDATE SET
+          plan = excluded.plan, status = excluded.status,
+          shopify_charge_id = excluded.shopify_charge_id,
+          current_period_end = excluded.current_period_end,
+          updated_at = NOW()
+      `, [
+        shopRow.id,
+        plan || (live.name.includes('Annual') ? 'annual' : 'monthly'),
+        live.status.toLowerCase(),
+        live.id,
+        live.currentPeriodEnd,
+      ]);
+      return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=1`);
+    } else {
+      await dbRun(
+        "UPDATE subscriptions SET status = 'declined', updated_at = NOW() WHERE shop_id = $1",
+        [shopRow.id]
+      );
+      return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=0`);
+    }
+  } catch (err) {
+    console.error('[Billing] callback error:', err.message);
+    res.status(500).send('Billing error — please try again');
+  }
+});
+
+// All remaining billing routes require authenticated shop session
 router.use(requireShopAuth);
 
 /**
@@ -89,52 +137,6 @@ router.post('/subscribe', async (req, res) => {
   } catch (err) {
     console.error('[Billing] subscribe error:', err.message);
     res.status(500).json({ error: 'Failed to create subscription' });
-  }
-});
-
-/**
- * GET /api/billing/callback — Shopify redirects here after merchant approves/declines
- */
-router.get('/callback', async (req, res) => {
-  const { shop, plan, charge_id } = req.query;
-  if (!shop) return res.status(400).send('Missing shop');
-
-  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1', [shop]);
-  if (!shopRow) return res.status(404).send('Shop not found');
-
-  try {
-    // Verify subscription is active with Shopify
-    const live = await getActiveSubscription(shop, shopRow.access_token);
-
-    if (live && (live.status === 'ACTIVE' || live.status === 'PENDING')) {
-      await dbRun(`
-        INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id, current_period_end)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT(shop_id) DO UPDATE SET
-          plan = excluded.plan, status = excluded.status,
-          shopify_charge_id = excluded.shopify_charge_id,
-          current_period_end = excluded.current_period_end,
-          updated_at = NOW()
-      `, [
-        shopRow.id,
-        plan || (live.name.includes('Annual') ? 'annual' : 'monthly'),
-        live.status.toLowerCase(),
-        live.id,
-        live.currentPeriodEnd,
-      ]);
-      // Redirect back to admin app
-      return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=1`);
-    } else {
-      // Merchant declined
-      await dbRun(
-        "UPDATE subscriptions SET status = 'declined', updated_at = NOW() WHERE shop_id = $1",
-        [shopRow.id]
-      );
-      return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=0`);
-    }
-  } catch (err) {
-    console.error('[Billing] callback error:', err.message);
-    res.status(500).send('Billing error — please try again');
   }
 });
 

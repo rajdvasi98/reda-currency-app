@@ -21,5 +21,13 @@ api_version = "2026-04"
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
   uri = "https://reda-currency-app.onrender.com/api/webhooks/compliance"
 
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "https://reda-currency-app.onrender.com/api/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/update"]
+  uri = "https://reda-currency-app.onrender.com/api/webhooks/app_subscriptions/update"
+
 [pos]
 embedded = false

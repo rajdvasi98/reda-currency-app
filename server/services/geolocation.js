@@ -4,8 +4,6 @@
  * Results are cached by /24 IP prefix for 24 hours to avoid hitting rate limits.
  * Primary: ip-api.com. Fallback: ipapi.co.
  */
-import fetch from 'node-fetch';
-
 const GEO_API = process.env.GEO_API_URL || 'http://ip-api.com/json';
 
 // Cache: ip prefix -> { countryCode, country, ts }
