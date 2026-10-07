@@ -47,10 +47,10 @@ Open `.env` in the project root and fill in:
 ```
 SHOPIFY_API_KEY=paste_your_client_id_here
 SHOPIFY_API_SECRET=paste_your_client_secret_here
-SCOPES=read_products,read_script_tags,write_script_tags
+SCOPES=read_products
 HOST=https://multi-currency-converter.loca.lt
 PORT=3000
-SQLITE_PATH=./database.sqlite
+DATABASE_URL=postgresql://localhost:5432/currency_app
 NODE_ENV=development
 ```
 

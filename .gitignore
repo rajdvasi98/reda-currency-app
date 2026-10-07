@@ -29,5 +29,8 @@ tunnel-url.txt
 seed_demo.mjs
 create-demo.js
 
+# Temp theme data
+tmp-theme/
+
 # Claude session data
 .claude/

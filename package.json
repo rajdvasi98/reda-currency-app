@@ -12,20 +12,23 @@
     "setup": "npm install && npm run build:client",
     "tunnel": "node scripts/tunnel.js",
     "dev:live": "concurrently \"npm run dev\" \"npm run tunnel\"",
-    "test:server": "cross-env NODE_ENV=test PORT=3099 SQLITE_PATH=./test.sqlite SHOPIFY_API_KEY=testkey SHOPIFY_API_SECRET=testsecret SCOPES=read_products HOST=http://localhost:3099 node server/index.js",
+    "test:server": "cross-env NODE_ENV=test PORT=3099 DATABASE_URL=postgresql://localhost:5432/currency_test SHOPIFY_API_KEY=testkey SHOPIFY_API_SECRET=testsecret SCOPES=read_products HOST=http://localhost:3099 node server/index.js",
     "test": "node tests/test.js",
     "test:all": "concurrently -k -s first \"npm run test:server\" \"npm run test\""
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "@shopify/shopify-api": "^11.0.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "cross-env": "^10.1.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
     "node-fetch": "^3.3.2",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "vite": "^5.3.4"

@@ -101,7 +101,7 @@ curl -s -H "bypass-tunnel-reminder: true" https://multi-currency-converter.loca.
 - Server: `C:\Application\REDA currency apps\server\`
 - Admin UI: `C:\Application\REDA currency apps\admin\`
 - Environment: `C:\Application\REDA currency apps\.env`
-- Database: `C:\Application\REDA currency apps\server\database.sqlite`
+- Database: PostgreSQL (via DATABASE_URL env var)
 - Webhooks: `server/routes/webhooks.js`
 - HMAC middleware: `server/middleware/hmac.js`
 - Auth/OAuth: `server/routes/auth.js`

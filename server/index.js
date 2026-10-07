@@ -1,10 +1,11 @@
 import 'dotenv/config';
+import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDb, getDb } from './database/init.js';
+import { initDb, dbGet } from './database/init.js';
 import authRoutes from './routes/auth.js';
 import { resolveShop } from './middleware/sessionToken.js';
 import countriesRoutes from './routes/countries.js';
@@ -20,10 +21,6 @@ import testHelpersRoutes from './routes/testHelpers.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || `http://localhost:${PORT}`;
-
-// Initialize database
-const dbPath = process.env.SQLITE_PATH || './database.sqlite';
-initDb(dbPath);
 
 const app = express();
 app.set('trust proxy', true);
@@ -153,7 +150,7 @@ app.get('/privacy', (req, res) => {
   </ul>
 
   <h2>6. Security</h2>
-  <p>All data is transmitted over HTTPS. Access tokens are stored securely in an SQLite database on the server. We use HMAC verification for all Shopify webhooks.</p>
+  <p>All data is transmitted over HTTPS. Access tokens are stored securely in a PostgreSQL database on the server. We use HMAC verification for all Shopify webhooks.</p>
 
   <h2>7. Contact</h2>
   <p>For privacy-related questions or data deletion requests, contact us at:<br>
@@ -172,12 +169,11 @@ const adminFallback = (req, res) => {
 app.get('/admin', adminFallback);
 
 // Embedded app entry point — redirect to OAuth if shop is not installed
-app.get('/app*', (req, res) => {
+app.get('/app*', async (req, res) => {
   const shop = req.query.shop;
   if (shop) {
     try {
-      const db = getDb();
-      const shopRow = db.prepare('SELECT is_active FROM shops WHERE shop_domain = ?').get(shop);
+      const shopRow = await dbGet('SELECT is_active FROM shops WHERE shop_domain = $1', [shop]);
       if (!shopRow || !shopRow.is_active) {
         return res.redirect(`/api/auth/install?shop=${encodeURIComponent(shop)}`);
       }
@@ -209,9 +205,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 Multi Currency Converter v1.0.0`);
-  console.log(`   Port:   ${PORT}`);
-  console.log(`   Public: ${HOST}`);
-  console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
+async function start() {
+  await initDb();
+  app.listen(PORT, () => {
+    console.log(`\n Multi Currency Converter v1.0.0`);
+    console.log(`   Port:   ${PORT}`);
+    console.log(`   Public: ${HOST}`);
+    console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

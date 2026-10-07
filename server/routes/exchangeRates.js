@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDb } from '../database/init.js';
+import { dbGet } from '../database/init.js';
 import { requireShopAuth } from '../middleware/shopAuth.js';
 import { fetchAndStoreRates, getRatesForShop, setManualRate } from '../services/exchangeRate.js';
 
@@ -7,8 +7,8 @@ const router = Router();
 router.use(requireShopAuth);
 
 // GET /api/exchange-rates
-router.get('/', (req, res) => {
-  const rates = getRatesForShop(req.shopId);
+router.get('/', async (req, res) => {
+  const rates = await getRatesForShop(req.shopId);
   res.json(rates);
 });
 
@@ -20,9 +20,11 @@ router.post('/refresh', async (req, res) => {
 });
 
 // PUT /api/exchange-rates/:id — manual override
-router.put('/:id', (req, res) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM exchange_rates WHERE id = ? AND shop_id = ?').get(req.params.id, req.shopId);
+router.put('/:id', async (req, res) => {
+  const existing = await dbGet(
+    'SELECT * FROM exchange_rates WHERE id = $1 AND shop_id = $2',
+    [req.params.id, req.shopId]
+  );
   if (!existing) return res.status(404).json({ error: 'Rate not found' });
 
   const { rate } = req.body;
@@ -30,8 +32,8 @@ router.put('/:id', (req, res) => {
     return res.status(400).json({ error: 'Valid rate required' });
   }
 
-  setManualRate(req.shopId, existing.from_currency, existing.to_currency, parseFloat(rate));
-  const updated = db.prepare('SELECT * FROM exchange_rates WHERE id = ?').get(req.params.id);
+  await setManualRate(req.shopId, existing.from_currency, existing.to_currency, parseFloat(rate));
+  const updated = await dbGet('SELECT * FROM exchange_rates WHERE id = $1', [req.params.id]);
   res.json(updated);
 });
 

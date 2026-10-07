@@ -8,7 +8,7 @@
  *   GET /api/proxy/prices   → batch-convert prices for a list of amounts
  */
 import { Router } from 'express';
-import { getDb } from '../database/init.js';
+import { dbGet, dbAll } from '../database/init.js';
 import { detectCountry, extractClientIp } from '../services/geolocation.js';
 import { convertPrice } from '../services/priceConverter.js';
 
@@ -19,27 +19,28 @@ const router = Router();
  * Returns all config the widget needs: countries, currencies, rates, settings.
  * Called once on page load by the widget.
  */
-router.get('/config', (req, res) => {
+router.get('/config', async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
 
-  const db = getDb();
-  const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ? AND is_active = 1').get(shop);
+  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
   if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
 
-  const countries = db.prepare(
-    'SELECT * FROM countries WHERE shop_id = ? AND is_enabled = 1 ORDER BY country_name'
-  ).all(shopRow.id);
+  const countries = await dbAll(
+    'SELECT * FROM countries WHERE shop_id = $1 AND is_enabled = 1 ORDER BY country_name',
+    [shopRow.id]
+  );
 
-  const currencies = db.prepare('SELECT * FROM currencies').all();
+  const currencies = await dbAll('SELECT * FROM currencies', []);
   const currencyMap = Object.fromEntries(currencies.map(c => [c.code, c]));
 
-  const rates = db.prepare(
-    'SELECT to_currency, rate FROM exchange_rates WHERE shop_id = ? AND from_currency = ?'
-  ).all(shopRow.id, shopRow.default_currency);
+  const rates = await dbAll(
+    'SELECT to_currency, rate FROM exchange_rates WHERE shop_id = $1 AND from_currency = $2',
+    [shopRow.id, shopRow.default_currency]
+  );
   const rateMap = Object.fromEntries(rates.map(r => [r.to_currency, r.rate]));
 
-  const settings = db.prepare('SELECT * FROM settings WHERE shop_id = ?').get(shopRow.id) || {};
+  const settings = await dbGet('SELECT * FROM settings WHERE shop_id = $1', [shopRow.id]) || {};
 
   res.set('Cache-Control', 'public, max-age=300'); // 5 min cache
   res.set('Access-Control-Allow-Origin', '*');
@@ -75,12 +76,12 @@ router.get('/detect', async (req, res) => {
 
   // Find matching country in shop config
   if (geoResult.countryCode) {
-    const db = getDb();
-    const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ? AND is_active = 1').get(shop);
+    const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
     if (shopRow) {
-      const country = db.prepare(
-        'SELECT * FROM countries WHERE shop_id = ? AND country_code = ? AND is_enabled = 1'
-      ).get(shopRow.id, geoResult.countryCode);
+      const country = await dbGet(
+        'SELECT * FROM countries WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1',
+        [shopRow.id, geoResult.countryCode]
+      );
 
       if (country) {
         return res.json({ detected: true, country, source: geoResult.source });
@@ -95,28 +96,27 @@ router.get('/detect', async (req, res) => {
  * GET /api/proxy/prices?shop=&country=&prices=100,200,300
  * Convert a list of prices (comma-separated, in base currency cents) to target country currency.
  */
-router.get('/prices', (req, res) => {
+router.get('/prices', async (req, res) => {
   const { shop, country: countryCode, prices: pricesParam } = req.query;
   if (!shop || !countryCode || !pricesParam) {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  const db = getDb();
-  const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ? AND is_active = 1').get(shop);
+  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
   if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
 
   const basePrices = pricesParam.split(',').map(Number).filter(n => !isNaN(n));
 
-  const results = basePrices.map(basePrice => {
+  const results = await Promise.all(basePrices.map(async (basePrice) => {
     // Shopify prices are in cents; convert to decimal
     const priceDecimal = basePrice / 100;
-    const result = convertPrice(shopRow.id, priceDecimal, shopRow.default_currency, countryCode);
+    const result = await convertPrice(shopRow.id, priceDecimal, shopRow.default_currency, countryCode);
     return {
       original: basePrice,
       converted: Math.round(result.price * 100),
       currency: result.currency,
     };
-  });
+  }));
 
   res.set('Access-Control-Allow-Origin', '*');
   res.json({ results });

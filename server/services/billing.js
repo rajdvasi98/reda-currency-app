@@ -127,7 +127,7 @@ export async function cancelSubscription(shop, accessToken, subscriptionId) {
 }
 
 async function shopifyGraphQL(shop, accessToken, query, variables) {
-  const res = await fetch(`https://${shop}/admin/api/2024-01/graphql.json`, {
+  const res = await fetch(`https://${shop}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

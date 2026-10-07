@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDb } from '../database/init.js';
+import { dbGet, dbRun } from '../database/init.js';
 import { requireShopAuth } from '../middleware/shopAuth.js';
 import { createSubscription, getActiveSubscription, cancelSubscription, PLANS } from '../services/billing.js';
 
@@ -25,30 +25,30 @@ router.get('/plans', (req, res) => {
  * GET /api/billing/subscription — get current subscription status
  */
 router.get('/subscription', async (req, res) => {
-  const db = getDb();
-  const local = db.prepare('SELECT * FROM subscriptions WHERE shop_id = ?').get(req.shopId);
+  const local = await dbGet('SELECT * FROM subscriptions WHERE shop_id = $1', [req.shopId]);
 
   // Also check Shopify for live status
   try {
     const live = await getActiveSubscription(req.shopRow.shop_domain, req.shopRow.access_token);
     if (live) {
       // Sync to local db
-      db.prepare(`
+      await dbRun(`
         INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id, current_period_end)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT(shop_id) DO UPDATE SET
           status = excluded.status,
           shopify_charge_id = excluded.shopify_charge_id,
           current_period_end = excluded.current_period_end,
-          updated_at = CURRENT_TIMESTAMP
-      `).run(
+          updated_at = NOW()
+      `, [
         req.shopId,
         live.name.includes('Annual') ? 'annual' : 'monthly',
         live.status.toLowerCase(),
         live.id,
         live.currentPeriodEnd,
-      );
-      return res.json({ subscription: live, local: db.prepare('SELECT * FROM subscriptions WHERE shop_id = ?').get(req.shopId) });
+      ]);
+      const updatedLocal = await dbGet('SELECT * FROM subscriptions WHERE shop_id = $1', [req.shopId]);
+      return res.json({ subscription: live, local: updatedLocal });
     }
   } catch (err) {
     console.warn('Could not fetch live subscription:', err.message);
@@ -76,15 +76,14 @@ router.post('/subscribe', async (req, res) => {
     );
 
     // Record pending subscription
-    const db = getDb();
-    db.prepare(`
+    await dbRun(`
       INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id)
-      VALUES (?, ?, 'pending', ?)
+      VALUES ($1, $2, 'pending', $3)
       ON CONFLICT(shop_id) DO UPDATE SET
         plan = excluded.plan, status = 'pending',
         shopify_charge_id = excluded.shopify_charge_id,
-        updated_at = CURRENT_TIMESTAMP
-    `).run(req.shopId, plan, result.subscriptionId);
+        updated_at = NOW()
+    `, [req.shopId, plan, result.subscriptionId]);
 
     res.json({ confirmationUrl: result.confirmationUrl });
   } catch (err) {
@@ -100,8 +99,7 @@ router.get('/callback', async (req, res) => {
   const { shop, plan, charge_id } = req.query;
   if (!shop) return res.status(400).send('Missing shop');
 
-  const db = getDb();
-  const shopRow = db.prepare('SELECT * FROM shops WHERE shop_domain = ?').get(shop);
+  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1', [shop]);
   if (!shopRow) return res.status(404).send('Shop not found');
 
   try {
@@ -109,28 +107,29 @@ router.get('/callback', async (req, res) => {
     const live = await getActiveSubscription(shop, shopRow.access_token);
 
     if (live && (live.status === 'ACTIVE' || live.status === 'PENDING')) {
-      db.prepare(`
+      await dbRun(`
         INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id, current_period_end)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT(shop_id) DO UPDATE SET
           plan = excluded.plan, status = excluded.status,
           shopify_charge_id = excluded.shopify_charge_id,
           current_period_end = excluded.current_period_end,
-          updated_at = CURRENT_TIMESTAMP
-      `).run(
+          updated_at = NOW()
+      `, [
         shopRow.id,
         plan || (live.name.includes('Annual') ? 'annual' : 'monthly'),
         live.status.toLowerCase(),
         live.id,
         live.currentPeriodEnd,
-      );
+      ]);
       // Redirect back to admin app
       return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=1`);
     } else {
       // Merchant declined
-      db.prepare(
-        "UPDATE subscriptions SET status = 'declined', updated_at = CURRENT_TIMESTAMP WHERE shop_id = ?"
-      ).run(shopRow.id);
+      await dbRun(
+        "UPDATE subscriptions SET status = 'declined', updated_at = NOW() WHERE shop_id = $1",
+        [shopRow.id]
+      );
       return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}?subscribed=0`);
     }
   } catch (err) {
@@ -143,18 +142,19 @@ router.get('/callback', async (req, res) => {
  * DELETE /api/billing/subscription — cancel subscription
  */
 router.delete('/subscription', async (req, res) => {
-  const db = getDb();
-  const sub = db.prepare('SELECT * FROM subscriptions WHERE shop_id = ?').get(req.shopId);
+  const sub = await dbGet('SELECT * FROM subscriptions WHERE shop_id = $1', [req.shopId]);
   if (!sub?.shopify_charge_id) return res.status(404).json({ error: 'No active subscription' });
 
   try {
     await cancelSubscription(req.shopRow.shop_domain, req.shopRow.access_token, sub.shopify_charge_id);
-    db.prepare(
-      "UPDATE subscriptions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE shop_id = ?"
-    ).run(req.shopId);
+    await dbRun(
+      "UPDATE subscriptions SET status = 'cancelled', updated_at = NOW() WHERE shop_id = $1",
+      [req.shopId]
+    );
     res.json({ cancelled: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[Billing] cancel error:', err.message);
+    res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
 

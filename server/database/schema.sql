@@ -1,17 +1,17 @@
 CREATE TABLE IF NOT EXISTS shops (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_domain TEXT UNIQUE NOT NULL,
   access_token TEXT NOT NULL,
   refresh_token TEXT,
-  token_expires_at DATETIME,
+  token_expires_at TIMESTAMPTZ,
   default_currency TEXT DEFAULT 'USD',
   is_active INTEGER DEFAULT 1,
-  installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  installed_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS currencies (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   symbol TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS currencies (
 );
 
 CREATE TABLE IF NOT EXISTS countries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   country_code TEXT NOT NULL,
   country_name TEXT NOT NULL,
@@ -32,24 +32,24 @@ CREATE TABLE IF NOT EXISTS countries (
   price_adjustment_type TEXT DEFAULT 'exchange_rate',
   price_adjustment_value REAL DEFAULT 0,
   rounding_rule TEXT DEFAULT 'none',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(shop_id, country_code)
 );
 
 CREATE TABLE IF NOT EXISTS exchange_rates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   from_currency TEXT NOT NULL,
   to_currency TEXT NOT NULL,
   rate REAL NOT NULL DEFAULT 1,
   source TEXT DEFAULT 'auto',
-  fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fetched_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(shop_id, from_currency, to_currency)
 );
 
 CREATE TABLE IF NOT EXISTS pricing_rules (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   country_code TEXT NOT NULL,
   rule_type TEXT NOT NULL DEFAULT 'all',
@@ -59,12 +59,12 @@ CREATE TABLE IF NOT EXISTS pricing_rules (
   percentage_adjustment REAL,
   priority INTEGER DEFAULT 0,
   is_enabled INTEGER DEFAULT 1,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_id INTEGER UNIQUE NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   auto_detect_enabled INTEGER DEFAULT 1,
   widget_position TEXT DEFAULT 'bottom-left',
@@ -76,28 +76,26 @@ CREATE TABLE IF NOT EXISTS settings (
   fallback_country TEXT DEFAULT 'US',
   show_flags INTEGER DEFAULT 1,
   show_country_name INTEGER DEFAULT 1,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Billing / subscription tracking
 CREATE TABLE IF NOT EXISTS subscriptions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_id INTEGER UNIQUE NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   plan TEXT NOT NULL DEFAULT 'free',
   status TEXT NOT NULL DEFAULT 'pending',
   shopify_charge_id TEXT,
-  trial_ends_at DATETIME,
-  current_period_end DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  trial_ends_at TIMESTAMPTZ,
+  current_period_end TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- GDPR / privacy audit log
 CREATE TABLE IF NOT EXISTS gdpr_requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   shop_domain TEXT NOT NULL,
   topic TEXT NOT NULL,
   payload TEXT,
-  received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  received_at TIMESTAMPTZ DEFAULT NOW()
 );

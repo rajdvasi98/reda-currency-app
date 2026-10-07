@@ -10,7 +10,7 @@ A Shopify App Store app that lets merchants sell in multiple currencies.
 - **Pricing rules** — per-country percentage adjustments, fixed adjustments, or full price overrides per product
 - **Rounding rules** — nearest 0.99, 0.95, integer, 10, 50, 100
 - **Embedded admin UI** — React SPA embedded in Shopify Admin via App Bridge
-- **Storefront widget** — lightweight JS script tag injected into the theme
+- **Storefront widget** — Theme App Extension (App Embed Block) with lightweight JS
 - **Billing** — Shopify App Subscription API with monthly ($5/mo) and annual ($50/yr) plans, 7-day trial
 - **Full GDPR compliance** — customers/redact, shop/redact, customers/data_request webhooks
 
@@ -21,11 +21,12 @@ Multi Currency Converter
 ├── server/                  # Express.js backend (Node.js, ES modules)
 │   ├── index.js             # App entry point, middleware setup
 │   ├── database/
-│   │   ├── schema.sql       # SQLite schema (shops, countries, rates, rules, …)
-│   │   ├── init.js          # DB init + migrations
+│   │   ├── schema.sql       # PostgreSQL schema (shops, countries, rates, rules, …)
+│   │   ├── init.js          # DB init (PostgreSQL Pool)
 │   │   └── seeds.js         # Default countries & currencies
 │   ├── middleware/
 │   │   ├── hmac.js          # Shopify HMAC verification (OAuth + webhooks)
+│   │   ├── sessionToken.js  # Session token verification + shop resolution
 │   │   └── shopAuth.js      # Per-request shop authentication
 │   ├── routes/
 │   │   ├── auth.js          # OAuth install + callback, webhook registration
@@ -56,8 +57,14 @@ Multi Currency Converter
 │       ├── PricingRules.jsx # Create/edit pricing rules
 │       ├── Settings.jsx     # Widget appearance settings
 │       └── Billing.jsx      # Plan selection and subscription status
+├── extensions/
+│   └── currency-widget/     # Shopify Theme App Extension
+│       ├── assets/currency-widget.js
+│       ├── blocks/app-embed.liquid
+│       ├── locales/en.default.json
+│       └── shopify.extension.toml
 ├── storefront/
-│   └── currency-widget.js  # Injected into storefronts via script tag
+│   └── currency-widget.js  # Standalone widget (CDN fallback)
 └── public/                  # Static demo assets
 ```
 
@@ -66,7 +73,7 @@ Multi Currency Converter
 | Layer | Tech |
 |---|---|
 | Backend | Node.js 20+, Express 4, ES modules |
-| Database | SQLite (better-sqlite3) |
+| Database | PostgreSQL (pg) |
 | Frontend | React 19, Vite 5 |
 | Auth | Shopify OAuth 2.0 with expiring offline tokens |
 | Webhooks | HMAC-verified, raw body middleware |
@@ -98,7 +105,7 @@ SHOPIFY_API_SECRET=your_api_secret
 SCOPES=read_products
 HOST=https://your-tunnel-or-domain.com
 PORT=3000
-SQLITE_PATH=./database.sqlite
+DATABASE_URL=postgresql://localhost:5432/currency_app
 NODE_ENV=development
 ```
 
@@ -144,7 +151,7 @@ This app implements all mandatory requirements for Shopify App Store listing:
 | `SCOPES` | OAuth permission scopes |
 | `HOST` | Public HTTPS URL (tunnel or production domain) |
 | `PORT` | Local server port (default 3000) |
-| `SQLITE_PATH` | Path to SQLite database file |
+| `DATABASE_URL` | PostgreSQL connection string |
 | `NODE_ENV` | `development` or `production` |
 | `EXCHANGE_RATE_API_URL` | Override exchange rate API base URL (optional) |
 | `GEO_API_URL` | Override geolocation API URL (optional) |

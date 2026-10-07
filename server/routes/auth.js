@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDb } from '../database/init.js';
+import { dbGet, dbRun, dbAll, getPool } from '../database/init.js';
 import { fetchAndStoreRates } from '../services/exchangeRate.js';
 import { defaultCountries } from '../database/seeds.js';
 import { verifyOAuthHmac, validateShopDomain } from '../middleware/hmac.js';
@@ -60,41 +60,38 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
       : null;
 
     // Fetch shop info (currency, etc.)
-    const shopInfoRes = await fetch(`https://${shop}/admin/api/2024-01/shop.json`, {
+    const shopInfoRes = await fetch(`https://${shop}/admin/api/2026-04/shop.json`, {
       headers: { 'X-Shopify-Access-Token': access_token },
     });
     const shopData = await shopInfoRes.json();
     const defaultCurrency = shopData?.shop?.currency || 'USD';
 
-    const db = getDb();
-
     // Upsert shop
-    db.prepare(`
+    await dbRun(`
       INSERT INTO shops (shop_domain, access_token, refresh_token, token_expires_at, default_currency, is_active)
-      VALUES (@shop_domain, @access_token, @refresh_token, @token_expires_at, @default_currency, 1)
+      VALUES ($1, $2, $3, $4, $5, 1)
       ON CONFLICT(shop_domain) DO UPDATE SET
         access_token = excluded.access_token,
         refresh_token = excluded.refresh_token,
         token_expires_at = excluded.token_expires_at,
         default_currency = excluded.default_currency,
-        is_active = 1, updated_at = CURRENT_TIMESTAMP
-    `).run({ shop_domain: shop, access_token, refresh_token: refresh_token || null, token_expires_at: tokenExpiresAt, default_currency: defaultCurrency });
+        is_active = 1, updated_at = NOW()
+    `, [shop, access_token, refresh_token || null, tokenExpiresAt, defaultCurrency]);
 
-    const shopRow = db.prepare('SELECT id FROM shops WHERE shop_domain = ?').get(shop);
+    const shopRow = await dbGet('SELECT id FROM shops WHERE shop_domain = $1', [shop]);
     const shopId = shopRow.id;
 
     // Default settings
-    db.prepare('INSERT OR IGNORE INTO settings (shop_id) VALUES (?)').run(shopId);
+    await dbRun('INSERT INTO settings (shop_id) VALUES ($1) ON CONFLICT DO NOTHING', [shopId]);
 
     // Seed default countries
-    const insertCountry = db.prepare(`
-      INSERT OR IGNORE INTO countries (shop_id, country_code, country_name, currency_code, flag_emoji)
-      VALUES (@shop_id, @country_code, @country_name, @currency_code, @flag_emoji)
-    `);
-    const seedAll = db.transaction((countries) => {
-      for (const c of countries) insertCountry.run({ shop_id: shopId, ...c });
-    });
-    seedAll(defaultCountries);
+    for (const c of defaultCountries) {
+      await dbRun(`
+        INSERT INTO countries (shop_id, country_code, country_name, currency_code, flag_emoji)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT DO NOTHING
+      `, [shopId, c.country_code, c.country_name, c.currency_code, c.flag_emoji]);
+    }
 
     // Register mandatory GDPR + billing webhooks
     await registerWebhooks(shop, access_token);
@@ -117,22 +114,22 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
  * GET /api/auth/session?shop=
  * Check if shop is installed (used by admin UI on load).
  */
-router.get('/session', (req, res) => {
+router.get('/session', async (req, res) => {
   const shop = req.query.shop || req.headers['x-shopify-shop-domain'];
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
   if (!validateShopDomain(shop)) return res.status(400).json({ error: 'Invalid shop domain' });
 
-  const db = getDb();
-  const shopRow = db.prepare(
-    'SELECT id, shop_domain, default_currency, is_active FROM shops WHERE shop_domain = ?'
-  ).get(shop);
+  const shopRow = await dbGet(
+    'SELECT id, shop_domain, default_currency, is_active FROM shops WHERE shop_domain = $1',
+    [shop]
+  );
 
   if (!shopRow || !shopRow.is_active) {
     return res.status(401).json({ error: 'Shop not installed', installUrl: `/api/auth/install?shop=${shop}` });
   }
 
   // Include subscription status
-  const sub = db.prepare('SELECT plan, status, trial_ends_at, current_period_end FROM subscriptions WHERE shop_id = ?').get(shopRow.id);
+  const sub = await dbGet('SELECT plan, status, trial_ends_at, current_period_end FROM subscriptions WHERE shop_id = $1', [shopRow.id]);
 
   res.json({ shop: shopRow, subscription: sub || null });
 });
@@ -160,7 +157,7 @@ async function registerWebhooks(shop, accessToken) {
 
   for (const wh of webhooks) {
     try {
-      const res = await fetch(`https://${shop}/admin/api/2024-01/graphql.json`, {
+      const res = await fetch(`https://${shop}/admin/api/2026-04/graphql.json`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': accessToken },
         body: JSON.stringify({

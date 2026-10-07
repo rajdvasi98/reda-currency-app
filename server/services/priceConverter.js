@@ -3,10 +3,10 @@
  * Resolution order for a given (shop, country, product):
  *   1. Product-level price override rule (exact price, no conversion)
  *   2. All-products percentage or fixed adjustment rule
- *   3. Exchange rate × country-level percentage/fixed adjustment
+ *   3. Exchange rate x country-level percentage/fixed adjustment
  * Rounding is applied last, after all adjustments.
  */
-import { getDb } from '../database/init.js';
+import { dbGet, dbAll } from '../database/init.js';
 import { getRate } from './exchangeRate.js';
 
 function applyRounding(price, rule) {
@@ -21,23 +21,23 @@ function applyRounding(price, rule) {
   }
 }
 
-export function convertPrice(shopId, basePrice, baseCurrency, countryCode, productId = null) {
+export async function convertPrice(shopId, basePrice, baseCurrency, countryCode, productId = null) {
   if (!basePrice || basePrice <= 0) return { price: basePrice, currency: baseCurrency, converted: false };
 
-  const db = getDb();
-  const country = db.prepare(
-    'SELECT * FROM countries WHERE shop_id = ? AND country_code = ? AND is_enabled = 1'
-  ).get(shopId, countryCode);
+  const country = await dbGet(
+    'SELECT * FROM countries WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1',
+    [shopId, countryCode]
+  );
 
   if (!country) return { price: basePrice, currency: baseCurrency, converted: false };
 
   const targetCurrency = country.currency_code;
 
-  const rules = db.prepare(`
+  const rules = await dbAll(`
     SELECT * FROM pricing_rules
-    WHERE shop_id = ? AND country_code = ? AND is_enabled = 1
+    WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1
     ORDER BY priority DESC, CASE rule_type WHEN 'product' THEN 1 WHEN 'collection' THEN 2 ELSE 3 END ASC
-  `).all(shopId, countryCode);
+  `, [shopId, countryCode]);
 
   let overrideRule = null;
   for (const rule of rules) {
@@ -51,7 +51,7 @@ export function convertPrice(shopId, basePrice, baseCurrency, countryCode, produ
     return { price: applyRounding(overrideRule.price_override, country.rounding_rule), currency: targetCurrency, converted: true, source: 'override' };
   }
 
-  const rate = getRate(shopId, baseCurrency, targetCurrency);
+  const rate = await getRate(shopId, baseCurrency, targetCurrency);
   if (!rate) return { price: basePrice, currency: baseCurrency, converted: false };
 
   let converted = basePrice * rate;
@@ -69,9 +69,8 @@ export function convertPrice(shopId, basePrice, baseCurrency, countryCode, produ
   return { price: applyRounding(converted, country.rounding_rule), currency: targetCurrency, converted: true };
 }
 
-export function formatPrice(price, currencyCode) {
-  const db = getDb();
-  const currency = db.prepare('SELECT * FROM currencies WHERE code = ?').get(currencyCode);
+export async function formatPrice(price, currencyCode) {
+  const currency = await dbGet('SELECT * FROM currencies WHERE code = $1', [currencyCode]);
   if (!currency) return `${currencyCode} ${price.toFixed(2)}`;
   const formatted = price.toFixed(currency.decimal_places).replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousand_separator);
   return currency.symbol_position === 'before' ? `${currency.symbol}${formatted}` : `${formatted} ${currency.symbol}`;

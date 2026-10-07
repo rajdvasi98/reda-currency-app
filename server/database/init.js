@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import pg from 'pg';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -6,34 +6,46 @@ import { currencies } from './seeds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-let db;
+let pool;
 
-export function getDb() { return db; }
+export function getPool() { return pool; }
 
-export function initDb(dbPath) {
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+export async function initDb() {
+  pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+    max: 10,
+  });
 
   const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-  db.exec(schema);
+  await pool.query(schema);
 
-  // Migrate: add columns introduced after initial schema
-  try { db.exec('ALTER TABLE shops ADD COLUMN refresh_token TEXT'); } catch {}
-  try { db.exec('ALTER TABLE shops ADD COLUMN token_expires_at DATETIME'); } catch {}
-
-  seedCurrencies();
-  console.log('Database initialized:', dbPath);
-  return db;
+  await seedCurrencies();
+  console.log('Database initialized (PostgreSQL)');
 }
 
-function seedCurrencies() {
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO currencies
-      (code, name, symbol, symbol_position, decimal_places, thousand_separator, decimal_separator)
-    VALUES
-      (@code, @name, @symbol, @symbol_position, @decimal_places, @thousand_separator, @decimal_separator)
-  `);
-  const insertMany = db.transaction((rows) => { for (const r of rows) insert.run(r); });
-  insertMany(currencies);
+async function seedCurrencies() {
+  for (const c of currencies) {
+    await pool.query(
+      `INSERT INTO currencies (code, name, symbol, symbol_position, decimal_places, thousand_separator, decimal_separator)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (code) DO NOTHING`,
+      [c.code, c.name, c.symbol, c.symbol_position, c.decimal_places, c.thousand_separator, c.decimal_separator]
+    );
+  }
+}
+
+export async function dbGet(sql, params = []) {
+  const { rows } = await pool.query(sql, params);
+  return rows[0] || null;
+}
+
+export async function dbAll(sql, params = []) {
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+export async function dbRun(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result;
 }
