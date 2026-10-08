@@ -1,8 +1,3 @@
-/**
- * Multi Currency Converter Widget
- * Loaded via Shopify Theme App Extension (App Embed Block).
- * Handles auto geolocation, price conversion, and manual country/currency selector.
- */
 (function () {
   'use strict';
 
@@ -14,24 +9,16 @@
   const STORAGE_KEY = 'mc_currency_country';
   const CONFIG_KEY = 'mc_currency_config';
   const CONFIG_TTL = 5 * 60 * 1000;
+  const FLAG_CDN = 'https://flagcdn.com';
 
   let config = null;
   let currentCountry = null;
   let observer = null;
   let widgetEl = null;
 
-  function countryCodeToFlag(code) {
-    if (!code || code.length !== 2) return '';
-    const offset = 0x1F1E6 - 65;
-    const first = code.charCodeAt(0);
-    const second = code.charCodeAt(1);
-    if (first < 65 || first > 90 || second < 65 || second > 90) return '';
-    return String.fromCodePoint(first + offset) + String.fromCodePoint(second + offset);
-  }
-
-  function getFlag(country) {
-    if (country.flag_emoji && country.flag_emoji.length > 1) return country.flag_emoji;
-    return countryCodeToFlag(country.country_code) || '🌐';
+  function getFlagUrl(countryCode, size) {
+    if (!countryCode || countryCode.length !== 2) return '';
+    return `${FLAG_CDN}/${size || 'w40'}/${countryCode.toLowerCase()}.png`;
   }
 
   function getCachedConfig() {
@@ -200,13 +187,14 @@
     styleEl.textContent = `
       #mc-currency-widget {
         position: fixed;
-        ${isLeft ? 'left: 18px' : 'right: 18px'};
-        bottom: 18px;
+        ${isLeft ? 'left: 20px' : 'right: 20px'};
+        bottom: 20px;
         z-index: 2147483647;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
         font-size: 14px;
-        line-height: 1.4;
+        line-height: 1.5;
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
       #mc-currency-widget * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -214,47 +202,60 @@
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        background: #fff;
+        background: #ffffff;
         color: #1a1a1a;
-        border: 1px solid rgba(0,0,0,0.08);
-        border-radius: 50px;
-        padding: 10px 18px 10px 14px;
+        border: none;
+        border-radius: 100px;
+        padding: 8px 16px 8px 8px;
         cursor: pointer;
         font-size: 14px;
         font-weight: 500;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.1);
+        transition: box-shadow 0.2s ease, transform 0.15s ease;
         white-space: nowrap;
         user-select: none;
+        outline: none;
       }
       .mc-trigger:hover {
-        box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.14);
         transform: translateY(-1px);
       }
-      .mc-trigger:active { transform: translateY(0); }
-      .mc-trigger-flag { font-size: 22px; line-height: 1; flex-shrink: 0; }
+      .mc-trigger:active { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.1); }
+      .mc-trigger:focus-visible { box-shadow: 0 0 0 2px #3b82f6, 0 4px 16px rgba(0,0,0,0.1); }
+
+      .mc-trigger-flag {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid #f0f0f0;
+        flex-shrink: 0;
+        background: #f5f5f5;
+      }
       .mc-trigger-info {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
       }
       .mc-trigger-name {
         font-size: 14px;
         font-weight: 600;
         color: #1a1a1a;
+        letter-spacing: -0.01em;
       }
       .mc-trigger-code {
-        font-size: 12px;
-        font-weight: 500;
-        color: #888;
-        background: #f3f3f3;
-        padding: 2px 7px;
-        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #6b7280;
+        background: #f3f4f6;
+        padding: 2px 8px;
+        border-radius: 6px;
+        letter-spacing: 0.02em;
       }
       .mc-trigger-chevron {
         flex-shrink: 0;
-        color: #999;
-        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        color: #9ca3af;
+        transition: transform 0.2s ease;
         margin-left: 2px;
       }
       .mc-trigger[aria-expanded="true"] .mc-trigger-chevron { transform: rotate(180deg); }
@@ -262,72 +263,78 @@
       .mc-dropdown {
         position: absolute;
         ${isLeft ? 'left: 0' : 'right: 0'};
-        bottom: calc(100% + 8px);
-        background: #fff;
+        bottom: calc(100% + 10px);
+        background: #ffffff;
         border: 1px solid rgba(0,0,0,0.06);
         border-radius: 16px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.06);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.04), 0 12px 40px rgba(0,0,0,0.12);
         overflow: hidden;
-        min-width: 300px;
-        max-height: 420px;
+        width: 320px;
+        max-height: 440px;
         display: none;
         flex-direction: column;
-        animation: mc-pop-up 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+        transform-origin: bottom ${isLeft ? 'left' : 'right'};
       }
-      @keyframes mc-pop-up {
-        from { opacity: 0; transform: translateY(8px) scale(0.96); }
+      .mc-dropdown.open {
+        display: flex;
+        animation: mc-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes mc-slide-up {
+        from { opacity: 0; transform: translateY(6px) scale(0.97); }
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
-      .mc-dropdown.open { display: flex; }
 
       .mc-header {
-        padding: 16px 16px 12px;
-        border-bottom: 1px solid #f0f0f0;
+        padding: 16px 16px 14px;
+        border-bottom: 1px solid #f3f4f6;
       }
       .mc-header-title {
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
-        color: #1a1a1a;
+        color: #111827;
         margin-bottom: 12px;
+        letter-spacing: -0.01em;
       }
 
       .mc-search-wrap {
         display: flex;
         align-items: center;
         gap: 8px;
-        background: #f7f7f8;
-        border: 1.5px solid transparent;
+        background: #f9fafb;
+        border: 1.5px solid #e5e7eb;
         border-radius: 10px;
         padding: 9px 12px;
-        transition: all 0.15s ease;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
       }
       .mc-search-wrap:focus-within {
         border-color: #3b82f6;
-        background: #fff;
-        box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+        background: #ffffff;
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
       }
-      .mc-search-icon { color: #999; flex-shrink: 0; }
+      .mc-search-icon { color: #9ca3af; flex-shrink: 0; }
       .mc-search {
         background: none;
         border: none;
         outline: none;
-        color: #1a1a1a;
-        font-size: 13px;
+        color: #111827;
+        font-size: 14px;
         font-family: inherit;
         width: 100%;
+        line-height: 1.4;
       }
-      .mc-search::placeholder { color: #aaa; }
+      .mc-search::placeholder { color: #9ca3af; }
 
       .mc-list {
         overflow-y: auto;
         flex: 1;
         padding: 6px;
+        overscroll-behavior: contain;
         scrollbar-width: thin;
-        scrollbar-color: #ddd transparent;
+        scrollbar-color: #d1d5db transparent;
       }
-      .mc-list::-webkit-scrollbar { width: 5px; }
+      .mc-list::-webkit-scrollbar { width: 4px; }
       .mc-list::-webkit-scrollbar-track { background: transparent; }
-      .mc-list::-webkit-scrollbar-thumb { background: #ddd; border-radius: 5px; }
+      .mc-list::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
 
       .mc-item {
         display: flex;
@@ -335,7 +342,7 @@
         gap: 12px;
         padding: 10px 12px;
         cursor: pointer;
-        color: #333;
+        color: #374151;
         border: none;
         background: none;
         width: 100%;
@@ -343,54 +350,80 @@
         font-size: 14px;
         font-family: inherit;
         border-radius: 10px;
-        transition: background 0.12s ease;
+        transition: background 0.1s ease;
         position: relative;
+        outline: none;
       }
-      .mc-item:hover { background: #f5f5f7; }
+      .mc-item:hover { background: #f9fafb; }
+      .mc-item:focus-visible { background: #f3f4f6; box-shadow: inset 0 0 0 2px #3b82f6; }
       .mc-item.active { background: #eff6ff; }
+      .mc-item.active:hover { background: #dbeafe; }
       .mc-item[hidden] { display: none; }
-      .mc-flag { font-size: 24px; line-height: 1; flex-shrink: 0; }
-      .mc-item-info { flex: 1; min-width: 0; }
+
+      .mc-flag {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+        border: 2px solid #f3f4f6;
+        background: #f9fafb;
+      }
+      .mc-item.active .mc-flag { border-color: #bfdbfe; }
+
+      .mc-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       .mc-item-name {
         font-weight: 500;
         font-size: 14px;
-        color: #1a1a1a;
+        color: #111827;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        line-height: 1.3;
       }
       .mc-item-sub {
         font-size: 12px;
-        color: #888;
-        margin-top: 1px;
+        color: #6b7280;
+        margin-top: 2px;
+        line-height: 1.3;
       }
       .mc-check {
         flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #3b82f6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         opacity: 0;
-        transition: opacity 0.15s;
+        transform: scale(0.5);
+        transition: opacity 0.15s ease, transform 0.15s ease;
       }
-      .mc-item.active .mc-check { opacity: 1; }
+      .mc-item.active .mc-check { opacity: 1; transform: scale(1); }
 
       .mc-no-results {
-        padding: 24px 16px;
+        padding: 32px 16px;
         text-align: center;
         font-size: 13px;
-        color: #999;
+        color: #9ca3af;
         display: none;
       }
 
       @media (max-width: 480px) {
-        .mc-dropdown { min-width: 280px; max-width: calc(100vw - 36px); max-height: 360px; }
-        .mc-trigger { padding: 8px 14px 8px 10px; }
-        .mc-trigger-flag { font-size: 20px; }
+        #mc-currency-widget { ${isLeft ? 'left: 12px' : 'right: 12px'}; bottom: 12px; }
+        .mc-dropdown { width: calc(100vw - 24px); max-height: 380px; }
+        .mc-trigger { padding: 6px 14px 6px 6px; }
+        .mc-trigger-flag { width: 28px; height: 28px; }
         .mc-trigger-name { font-size: 13px; }
         .mc-search { font-size: 16px; }
         .mc-item { padding: 12px; }
+        .mc-flag { width: 32px; height: 32px; }
       }
     `;
     document.head.appendChild(styleEl);
 
-    const flag = activeCountry ? getFlag(activeCountry) : '🌐';
+    const flagSrc = activeCountry ? getFlagUrl(activeCountry.country_code, 'w80') : '';
     const name = activeCountry ? activeCountry.country_name : 'Select';
     const code = activeCountry ? activeCountry.currency_code : '';
 
@@ -399,7 +432,7 @@
         <div class="mc-header">
           <div class="mc-header-title">Select Country</div>
           <div class="mc-search-wrap">
-            <svg class="mc-search-icon" width="15" height="15" fill="none" viewBox="0 0 24 24">
+            <svg class="mc-search-icon" width="16" height="16" fill="none" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
               <path d="M16.5 16.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
@@ -418,7 +451,10 @@
         <div class="mc-no-results" id="mc-no-results">No countries found</div>
       </div>
       <button class="mc-trigger" id="mc-trigger" aria-haspopup="listbox" aria-expanded="false">
-        <span class="mc-trigger-flag" id="mc-trigger-flag">${flag}</span>
+        ${flagSrc
+          ? `<img class="mc-trigger-flag" id="mc-trigger-flag" src="${flagSrc}" alt="${name}" />`
+          : `<span class="mc-trigger-flag" id="mc-trigger-flag" style="display:flex;align-items:center;justify-content:center;font-size:16px;">🌐</span>`
+        }
         <span class="mc-trigger-info">
           <span class="mc-trigger-name" id="mc-trigger-name">${name}</span>
           ${code ? `<span class="mc-trigger-code" id="mc-trigger-code">${code}</span>` : ''}
@@ -454,11 +490,26 @@
       filterList(cfg, currentCountry, searchInput.value.trim());
     });
 
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const firstVisible = el.querySelector('#mc-list .mc-item:not([hidden])');
+        if (firstVisible) firstVisible.focus();
+      }
+    });
+
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         dropdown.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
         trigger.focus();
+      }
+      if (e.target.classList.contains('mc-item')) {
+        const items = Array.from(el.querySelectorAll('#mc-list .mc-item:not([hidden])'));
+        const idx = items.indexOf(e.target);
+        if (e.key === 'ArrowDown' && idx < items.length - 1) { e.preventDefault(); items[idx + 1].focus(); }
+        if (e.key === 'ArrowUp' && idx > 0) { e.preventDefault(); items[idx - 1].focus(); }
+        if (e.key === 'ArrowUp' && idx === 0) { e.preventDefault(); searchInput.focus(); }
       }
     });
 
@@ -481,7 +532,7 @@
       const isActive = activeCountry?.country_code === country.country_code;
       const currency = cfg.currencies[country.currency_code];
       const symbol = currency?.symbol || '';
-      const flag = getFlag(country);
+      const flagUrl = getFlagUrl(country.country_code, 'w80');
 
       const btn = document.createElement('button');
       btn.className = 'mc-item' + (isActive ? ' active' : '');
@@ -490,14 +541,14 @@
       btn.dataset.search = `${country.country_name} ${country.country_code} ${country.currency_code}`.toLowerCase();
 
       btn.innerHTML = `
-        <span class="mc-flag">${flag}</span>
+        <img class="mc-flag" src="${flagUrl}" alt="${country.country_name}" loading="lazy" />
         <span class="mc-item-info">
           <span class="mc-item-name">${country.country_name}</span>
           <span class="mc-item-sub">${country.currency_code}${symbol ? ' · ' + symbol : ''}</span>
         </span>
         <span class="mc-check">
-          <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-            <path d="M5 13l4 4L19 7" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
+            <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </span>
       `;
@@ -522,11 +573,24 @@
     if (noResults) noResults.style.display = visible === 0 ? 'block' : 'none';
   }
 
-  function updateTriggerLabel(country, cfg) {
+  function updateTriggerLabel(country) {
     const flagEl = document.getElementById('mc-trigger-flag');
     const nameEl = document.getElementById('mc-trigger-name');
     const codeEl = document.getElementById('mc-trigger-code');
-    if (flagEl) flagEl.textContent = country ? getFlag(country) : '🌐';
+
+    if (flagEl && country) {
+      if (flagEl.tagName === 'IMG') {
+        flagEl.src = getFlagUrl(country.country_code, 'w80');
+        flagEl.alt = country.country_name;
+      } else {
+        const img = document.createElement('img');
+        img.className = 'mc-trigger-flag';
+        img.id = 'mc-trigger-flag';
+        img.src = getFlagUrl(country.country_code, 'w80');
+        img.alt = country.country_name;
+        flagEl.replaceWith(img);
+      }
+    }
     if (nameEl) nameEl.textContent = country ? country.country_name : 'Select';
     if (codeEl) codeEl.textContent = country ? country.currency_code : '';
   }
@@ -534,7 +598,7 @@
   function selectCountry(country, cfg) {
     currentCountry = country;
     saveCountry(country.country_code);
-    updateTriggerLabel(country, cfg);
+    updateTriggerLabel(country);
     populateList(cfg, country);
 
     const dropdown = document.getElementById('mc-dropdown');
