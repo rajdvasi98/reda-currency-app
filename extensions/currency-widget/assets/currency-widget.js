@@ -380,10 +380,12 @@
       }
 
       @media (max-width: 480px) {
-        .mc-dropdown { min-width: 280px; max-height: 360px; }
+        .mc-dropdown { min-width: 280px; max-width: calc(100vw - 36px); max-height: 360px; }
         .mc-trigger { padding: 8px 14px 8px 10px; }
         .mc-trigger-flag { font-size: 20px; }
         .mc-trigger-name { font-size: 13px; }
+        .mc-search { font-size: 16px; }
+        .mc-item { padding: 12px; }
       }
     `;
     document.head.appendChild(styleEl);
