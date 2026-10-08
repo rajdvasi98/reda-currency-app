@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { readFileSync, mkdirSync } from 'fs';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { currencies } from './seeds.js';
@@ -7,11 +7,11 @@ import { currencies } from './seeds.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let pool = null;
-let sqlite = null;
+let sqliteDb = null;
 
 export function getPool() { return pool; }
 
-// Convert PostgreSQL $1, $2 placeholders and NOW() to SQLite equivalents
+// Convert PostgreSQL $1/$2 placeholders and NOW() to SQLite equivalents
 function pgToSqlite(sql) {
   return sql
     .replace(/\$\d+/g, '?')
@@ -30,14 +30,13 @@ export async function initDb() {
     await seedCurrencies();
     console.log('Database initialized (PostgreSQL)');
   } else {
-    const { default: Database } = await import('better-sqlite3');
-    const dbPath = process.env.SQLITE_PATH || '/tmp/currency.db';
-    mkdirSync(dirname(dbPath), { recursive: true });
-    sqlite = new Database(dbPath);
+    const { default: initSqlJs } = await import('sql.js');
+    const SQL = await initSqlJs();
+    sqliteDb = new SQL.Database();
     const schema = readFileSync(join(__dirname, 'schema-sqlite.sql'), 'utf8');
-    sqlite.exec(schema);
+    sqliteDb.run(schema);
     seedCurrenciesSqlite();
-    console.log('Database initialized (SQLite fallback — set DATABASE_URL for PostgreSQL)');
+    console.log('Database initialized (SQLite in-memory — set DATABASE_URL env var for PostgreSQL)');
   }
 }
 
@@ -53,13 +52,35 @@ async function seedCurrencies() {
 }
 
 function seedCurrenciesSqlite() {
-  const stmt = sqlite.prepare(
+  const stmt = sqliteDb.prepare(
     `INSERT OR IGNORE INTO currencies (code, name, symbol, symbol_position, decimal_places, thousand_separator, decimal_separator)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   for (const c of currencies) {
-    stmt.run(c.code, c.name, c.symbol, c.symbol_position, c.decimal_places, c.thousand_separator, c.decimal_separator);
+    stmt.run([c.code, c.name, c.symbol, c.symbol_position, c.decimal_places, c.thousand_separator, c.decimal_separator]);
   }
+  stmt.free();
+}
+
+function sqliteGetOne(sql, params) {
+  const stmt = sqliteDb.prepare(pgToSqlite(sql));
+  stmt.bind(params);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  return row;
+}
+
+function sqliteGetAll(sql, params) {
+  const stmt = sqliteDb.prepare(pgToSqlite(sql));
+  stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+function sqliteExec(sql, params) {
+  sqliteDb.run(pgToSqlite(sql), params);
 }
 
 export async function dbGet(sql, params = []) {
@@ -67,7 +88,7 @@ export async function dbGet(sql, params = []) {
     const { rows } = await pool.query(sql, params);
     return rows[0] || null;
   }
-  return sqlite.prepare(pgToSqlite(sql)).get(...params) ?? null;
+  return sqliteGetOne(sql, params);
 }
 
 export async function dbAll(sql, params = []) {
@@ -75,12 +96,12 @@ export async function dbAll(sql, params = []) {
     const { rows } = await pool.query(sql, params);
     return rows;
   }
-  return sqlite.prepare(pgToSqlite(sql)).all(...params);
+  return sqliteGetAll(sql, params);
 }
 
 export async function dbRun(sql, params = []) {
   if (pool) {
     return await pool.query(sql, params);
   }
-  return sqlite.prepare(pgToSqlite(sql)).run(...params);
+  sqliteExec(sql, params);
 }
