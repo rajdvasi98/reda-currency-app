@@ -1,27 +1,44 @@
 import pg from 'pg';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { currencies } from './seeds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-let pool;
+let pool = null;
+let sqlite = null;
 
 export function getPool() { return pool; }
 
+// Convert PostgreSQL $1, $2 placeholders and NOW() to SQLite equivalents
+function pgToSqlite(sql) {
+  return sql
+    .replace(/\$\d+/g, '?')
+    .replace(/\bNOW\(\)/gi, "datetime('now')");
+}
+
 export async function initDb() {
-  pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-    max: 10,
-  });
-
-  const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-  await pool.query(schema);
-
-  await seedCurrencies();
-  console.log('Database initialized (PostgreSQL)');
+  if (process.env.DATABASE_URL) {
+    pool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      max: 10,
+    });
+    const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
+    await pool.query(schema);
+    await seedCurrencies();
+    console.log('Database initialized (PostgreSQL)');
+  } else {
+    const { default: Database } = await import('better-sqlite3');
+    const dbPath = process.env.SQLITE_PATH || '/tmp/currency.db';
+    mkdirSync(dirname(dbPath), { recursive: true });
+    sqlite = new Database(dbPath);
+    const schema = readFileSync(join(__dirname, 'schema-sqlite.sql'), 'utf8');
+    sqlite.exec(schema);
+    seedCurrenciesSqlite();
+    console.log('Database initialized (SQLite fallback — set DATABASE_URL for PostgreSQL)');
+  }
 }
 
 async function seedCurrencies() {
@@ -35,17 +52,35 @@ async function seedCurrencies() {
   }
 }
 
+function seedCurrenciesSqlite() {
+  const stmt = sqlite.prepare(
+    `INSERT OR IGNORE INTO currencies (code, name, symbol, symbol_position, decimal_places, thousand_separator, decimal_separator)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const c of currencies) {
+    stmt.run(c.code, c.name, c.symbol, c.symbol_position, c.decimal_places, c.thousand_separator, c.decimal_separator);
+  }
+}
+
 export async function dbGet(sql, params = []) {
-  const { rows } = await pool.query(sql, params);
-  return rows[0] || null;
+  if (pool) {
+    const { rows } = await pool.query(sql, params);
+    return rows[0] || null;
+  }
+  return sqlite.prepare(pgToSqlite(sql)).get(...params) ?? null;
 }
 
 export async function dbAll(sql, params = []) {
-  const { rows } = await pool.query(sql, params);
-  return rows;
+  if (pool) {
+    const { rows } = await pool.query(sql, params);
+    return rows;
+  }
+  return sqlite.prepare(pgToSqlite(sql)).all(...params);
 }
 
 export async function dbRun(sql, params = []) {
-  const result = await pool.query(sql, params);
-  return result;
+  if (pool) {
+    return await pool.query(sql, params);
+  }
+  return sqlite.prepare(pgToSqlite(sql)).run(...params);
 }
