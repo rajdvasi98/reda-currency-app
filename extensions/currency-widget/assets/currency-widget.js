@@ -13,7 +13,7 @@
   const SHOP = Shopify.shop;
   const STORAGE_KEY = 'mc_currency_country';
   const CONFIG_KEY = 'mc_currency_config';
-  const CONFIG_TTL = 5 * 60 * 1000; // 5 minutes
+  const CONFIG_TTL = 5 * 60 * 1000;
 
   let config = null;
   let currentCountry = null;
@@ -51,7 +51,6 @@
   async function loadConfig() {
     const cached = getCachedConfig();
     if (cached) return cached;
-
     const res = await fetch(`${APP_HOST}/api/proxy/config?shop=${SHOP}`);
     if (!res.ok) throw new Error('Failed to load currency config');
     const data = await res.json();
@@ -72,7 +71,6 @@
   }
 
   function resolveCountry(cfg) {
-    // 1. User's saved manual selection
     const saved = getSavedCountry();
     if (saved) {
       const match = cfg.countries.find(c => c.country_code === saved);
@@ -86,39 +84,29 @@
   function formatPrice(amount, currencyCode, cfg) {
     const currency = cfg.currencies[currencyCode];
     if (!currency) return `${currencyCode} ${amount.toFixed(2)}`;
-
     const dp = currency.decimal_places;
     const fixed = amount.toFixed(dp);
     const parts = fixed.split('.');
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousand_separator);
     const formatted = dp > 0 ? parts.join(currency.decimal_separator) : parts[0];
-
     return currency.symbol_position === 'before'
       ? `${currency.symbol}${formatted}`
       : `${formatted} ${currency.symbol}`;
   }
 
   function parseShopifyPrice(el) {
-    // Try data attribute first (most reliable)
     const raw = el.dataset.mcOriginal || el.dataset.productPrice || el.dataset.cartPrice;
     if (raw) return parseFloat(raw) / 100;
-
-    // Parse from text content
     const text = el.textContent.replace(/[^\d.,]/g, '').trim();
     if (!text) return null;
-
-    // Handle formats like 1.234,56 and 1,234.56
     let normalized = text;
     const lastComma = text.lastIndexOf(',');
     const lastDot = text.lastIndexOf('.');
     if (lastComma > lastDot) {
-      // European: 1.234,56
       normalized = text.replace(/\./g, '').replace(',', '.');
     } else {
-      // US: 1,234.56
       normalized = text.replace(/,/g, '');
     }
-
     const val = parseFloat(normalized);
     return isNaN(val) ? null : val;
   }
@@ -127,25 +115,17 @@
 
   function convertAmount(baseAmount, baseCurrency, countryConfig, cfg) {
     if (!countryConfig) return { price: baseAmount, currency: baseCurrency };
-
     const targetCurrency = countryConfig.currency_code;
     if (targetCurrency === baseCurrency) return { price: baseAmount, currency: baseCurrency };
-
     const rate = cfg.rates[targetCurrency];
     if (!rate) return { price: baseAmount, currency: baseCurrency };
-
     let price = baseAmount * rate;
-
-    // Apply country-level adjustment
     if (countryConfig.price_adjustment_type === 'percentage' && countryConfig.price_adjustment_value) {
       price *= (1 + countryConfig.price_adjustment_value / 100);
     } else if (countryConfig.price_adjustment_type === 'fixed' && countryConfig.price_adjustment_value) {
       price += countryConfig.price_adjustment_value;
     }
-
-    // Apply rounding
     price = applyRounding(price, countryConfig.rounding_rule);
-
     return { price, currency: targetCurrency };
   }
 
@@ -163,84 +143,45 @@
 
   // ─── DOM Price Rewriting ─────────────────────────────────────────────────────
 
-  // All common Shopify price selectors across popular themes (Dawn, Debut, Brooklyn, etc.)
   const PRICE_SELECTORS = [
-    '.money',
-    '.price',
-    '[data-product-price]',
-    '[data-cart-price]',
-    '[data-regular-price]',
-    '[data-compare-price]',
-    '.product__price .price-item',
-    '.product-price',
-    '.cart__price',
-    '.cart-item__price',
-    '.cart-item__old-price',
-    '.order-summary__emphasis',
-    '.product__price',
-    '.price__regular .price-item',
-    '.price__sale .price-item',
-    '.price-item--sale',
-    '.price-item--regular',
-    '.totals__subtotal-value',
-    '[class*="ProductPrice"]',
-    '[class*="product-price"]',
-    '[class*="Price__"]',
-    '.gift-card__price',
+    '.money', '.price', '[data-product-price]', '[data-cart-price]',
+    '[data-regular-price]', '[data-compare-price]', '.product__price .price-item',
+    '.product-price', '.cart__price', '.cart-item__price', '.cart-item__old-price',
+    '.order-summary__emphasis', '.product__price', '.price__regular .price-item',
+    '.price__sale .price-item', '.price-item--sale', '.price-item--regular',
+    '.totals__subtotal-value', '[class*="ProductPrice"]', '[class*="product-price"]',
+    '[class*="Price__"]', '.gift-card__price',
   ].join(',');
 
   function rewritePrices(countryConfig, cfg) {
-    const elements = document.querySelectorAll(PRICE_SELECTORS);
-
-    elements.forEach(el => {
-      // Skip already-converted (with no original stored)
+    document.querySelectorAll(PRICE_SELECTORS).forEach(el => {
       if (!el.dataset.mcOriginal) {
         const original = parseShopifyPrice(el);
         if (original === null || original === 0) return;
         el.dataset.mcOriginal = Math.round(original * 100);
       }
-
-      const originalCents = parseInt(el.dataset.mcOriginal);
-      const originalPrice = originalCents / 100;
-
+      const originalPrice = parseInt(el.dataset.mcOriginal) / 100;
       if (!countryConfig || countryConfig.currency_code === cfg.baseCurrency) {
-        // Restore original if switching back to base currency
         if (el.dataset.mcFormatted) {
           el.textContent = el.dataset.mcFormatted;
           delete el.dataset.mcFormatted;
         }
         return;
       }
-
-      // Store original formatted text once
-      if (!el.dataset.mcFormatted) {
-        el.dataset.mcFormatted = el.textContent.trim();
-      }
-
+      if (!el.dataset.mcFormatted) el.dataset.mcFormatted = el.textContent.trim();
       const { price, currency } = convertAmount(originalPrice, cfg.baseCurrency, countryConfig, cfg);
       el.textContent = formatPrice(price, currency, cfg);
     });
   }
 
-  // Observe DOM for dynamic content (AJAX cart, infinite scroll, quick views)
   function startObserver(countryConfig, cfg) {
     if (observer) observer.disconnect();
-
     observer = new MutationObserver((mutations) => {
-      let shouldRewrite = false;
-      for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0) {
-          shouldRewrite = true;
-          break;
-        }
-      }
-      if (shouldRewrite) {
-        // Small debounce to let DOM settle
+      if (mutations.some(m => m.addedNodes.length > 0)) {
         clearTimeout(observer._timer);
         observer._timer = setTimeout(() => rewritePrices(countryConfig, cfg), 150);
       }
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -248,7 +189,10 @@
 
   function buildWidget(cfg, activeCountry) {
     const s = cfg.settings;
-    const isBottomLeft = !s.widgetPosition || s.widgetPosition === 'bottom-left';
+    const isLeft = !s.widgetPosition || s.widgetPosition === 'bottom-left';
+    const bg = s.widgetBgColor || '#1a1a2e';
+    const fg = s.widgetTextColor || '#ffffff';
+    const accent = s.widgetAccentColor || '#e94560';
 
     const el = document.createElement('div');
     el.id = 'mc-currency-widget';
@@ -258,114 +202,225 @@
     const styles = `
       #mc-currency-widget {
         position: fixed;
-        ${isBottomLeft ? 'left: 16px' : 'right: 16px'};
+        ${isLeft ? 'left: 16px' : 'right: 16px'};
         bottom: 16px;
         z-index: 2147483647;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 14px;
       }
       #mc-currency-widget * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      /* ── Trigger Button ── */
       .mc-trigger {
         display: flex;
         align-items: center;
-        gap: 6px;
-        background: ${s.widgetBgColor};
-        color: ${s.widgetTextColor};
-        border: none;
-        border-radius: 24px;
-        padding: 8px 14px;
+        gap: 8px;
+        background: ${bg};
+        color: ${fg};
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 28px;
+        padding: 9px 16px 9px 12px;
         cursor: pointer;
         font-size: 13px;
         font-weight: 500;
-        letter-spacing: 0.3px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.25);
-        transition: transform 0.15s, box-shadow 0.15s;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s;
         white-space: nowrap;
         user-select: none;
+        min-width: 0;
       }
-      .mc-trigger:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+      .mc-trigger:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.2);
+        border-color: rgba(255,255,255,0.22);
+      }
       .mc-trigger:active { transform: translateY(0); }
-      .mc-trigger svg { flex-shrink: 0; }
+      .mc-trigger-flag { font-size: 20px; line-height: 1; flex-shrink: 0; }
+      .mc-trigger-info { display: flex; flex-direction: column; line-height: 1.25; text-align: left; }
+      .mc-trigger-name { font-size: 12px; font-weight: 600; }
+      .mc-trigger-code { font-size: 10px; opacity: 0.6; font-weight: 400; margin-top: 1px; }
+      .mc-trigger-chevron {
+        flex-shrink: 0;
+        opacity: 0.5;
+        transition: transform 0.2s ease;
+        margin-left: 2px;
+      }
+      .mc-trigger[aria-expanded="true"] .mc-trigger-chevron { transform: rotate(180deg); }
+
+      /* ── Dropdown ── */
       .mc-dropdown {
         position: absolute;
-        ${isBottomLeft ? 'left: 0' : 'right: 0'};
-        bottom: calc(100% + 8px);
-        background: ${s.widgetBgColor};
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+        ${isLeft ? 'left: 0' : 'right: 0'};
+        bottom: calc(100% + 10px);
+        background: ${bg};
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 16px;
+        box-shadow: 0 16px 48px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.2);
         overflow: hidden;
-        min-width: 220px;
-        max-height: 320px;
+        min-width: 260px;
+        max-height: 380px;
         display: none;
         flex-direction: column;
+        animation: mc-slide-up 0.18s ease;
+      }
+      @keyframes mc-slide-up {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
       .mc-dropdown.open { display: flex; }
-      .mc-dropdown-header {
-        padding: 12px 16px 8px;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: ${s.widgetAccentColor};
-        border-bottom: 1px solid rgba(255,255,255,0.1);
+
+      /* ── Dropdown Header ── */
+      .mc-header {
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
       }
+      .mc-header-title {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: ${accent};
+        margin-bottom: 10px;
+      }
+
+      /* ── Search Box ── */
+      .mc-search-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        padding: 7px 10px;
+        transition: border-color 0.15s;
+      }
+      .mc-search-wrap:focus-within {
+        border-color: ${accent};
+        background: rgba(255,255,255,0.1);
+      }
+      .mc-search-icon { opacity: 0.45; flex-shrink: 0; }
+      .mc-search {
+        background: none;
+        border: none;
+        outline: none;
+        color: ${fg};
+        font-size: 12px;
+        font-family: inherit;
+        width: 100%;
+        caret-color: ${accent};
+      }
+      .mc-search::placeholder { opacity: 0.4; }
+
+      /* ── Country List ── */
       .mc-list {
         overflow-y: auto;
+        flex: 1;
+        padding: 4px 0;
         scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.15) transparent;
       }
       .mc-list::-webkit-scrollbar { width: 4px; }
       .mc-list::-webkit-scrollbar-track { background: transparent; }
-      .mc-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+      .mc-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+      /* ── List Item ── */
       .mc-item {
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 9px 16px;
+        padding: 8px 14px;
         cursor: pointer;
-        color: ${s.widgetTextColor};
-        transition: background 0.1s;
+        color: ${fg};
         border: none;
         background: none;
         width: 100%;
         text-align: left;
         font-size: 13px;
+        font-family: inherit;
+        transition: background 0.1s;
+        position: relative;
       }
-      .mc-item:hover { background: rgba(255,255,255,0.08); }
-      .mc-item.active { background: rgba(255,255,255,0.12); }
-      .mc-item.active::after {
-        content: '✓';
-        margin-left: auto;
-        color: ${s.widgetAccentColor};
+      .mc-item:hover { background: rgba(255,255,255,0.07); }
+      .mc-item.active { background: rgba(255,255,255,0.1); }
+      .mc-item.active .mc-check {
+        opacity: 1;
+        color: ${accent};
+      }
+      .mc-item[hidden] { display: none; }
+      .mc-flag { font-size: 20px; line-height: 1; flex-shrink: 0; width: 26px; text-align: center; }
+      .mc-item-info { flex: 1; min-width: 0; }
+      .mc-item-name {
+        font-weight: 500;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .mc-item-sub {
+        font-size: 10px;
+        opacity: 0.5;
+        margin-top: 1px;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .mc-check {
+        flex-shrink: 0;
+        opacity: 0;
+        font-size: 13px;
+        font-weight: 700;
+        transition: opacity 0.15s;
+      }
+
+      /* ── No Results ── */
+      .mc-no-results {
+        padding: 16px;
+        text-align: center;
         font-size: 12px;
+        opacity: 0.45;
+        display: none;
       }
-      .mc-flag { font-size: 18px; line-height: 1; }
-      .mc-country-info { display: flex; flex-direction: column; line-height: 1.3; }
-      .mc-country-name { font-weight: 500; font-size: 13px; }
-      .mc-currency-code { font-size: 11px; opacity: 0.65; }
     `;
 
     const styleEl = document.createElement('style');
     styleEl.textContent = styles;
     document.head.appendChild(styleEl);
 
-    const activeLabel = activeCountry
-      ? `${s.showFlags ? activeCountry.flag_emoji + ' ' : ''}${s.showCountryName ? activeCountry.country_name : activeCountry.currency_code}`
-      : '🌐 Select';
+    const flag = activeCountry ? (activeCountry.flag_emoji || '🌐') : '🌐';
+    const name = activeCountry ? activeCountry.country_name : 'Select';
+    const code = activeCountry ? activeCountry.currency_code : '';
 
     el.innerHTML = `
       <div class="mc-dropdown" id="mc-dropdown" role="listbox" aria-label="Select country">
-        <div class="mc-dropdown-header">Select your country</div>
-        <div class="mc-list" id="mc-list"></div>
+        <div class="mc-header">
+          <div class="mc-header-title">Select Country / Currency</div>
+          <div class="mc-search-wrap">
+            <svg class="mc-search-icon" width="13" height="13" fill="none" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="7" stroke="${fg}" stroke-width="2"/>
+              <path d="M16.5 16.5l4 4" stroke="${fg}" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input
+              class="mc-search"
+              id="mc-search"
+              type="text"
+              placeholder="Search country or currency…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Search countries"
+            />
+          </div>
+        </div>
+        <div class="mc-list" id="mc-list" role="listbox"></div>
+        <div class="mc-no-results" id="mc-no-results">No countries found</div>
       </div>
       <button class="mc-trigger" id="mc-trigger" aria-haspopup="listbox" aria-expanded="false">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M12 2C12 2 8 6 8 12s4 10 4 10 4-6 4-10S12 2 12 2z" stroke="currentColor" stroke-width="2"/>
-          <path d="M2 12h20" stroke="currentColor" stroke-width="2"/>
-        </svg>
-        <span id="mc-active-label">${activeLabel}</span>
-        <svg width="10" height="10" fill="none" viewBox="0 0 24 24" style="opacity:0.6">
-          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <span class="mc-trigger-flag" id="mc-trigger-flag">${flag}</span>
+        <span class="mc-trigger-info">
+          <span class="mc-trigger-name" id="mc-trigger-name">${name}</span>
+          ${code ? `<span class="mc-trigger-code" id="mc-trigger-code">${code}</span>` : ''}
+        </span>
+        <svg class="mc-trigger-chevron" width="11" height="11" fill="none" viewBox="0 0 24 24">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
     `;
@@ -373,17 +428,38 @@
     document.body.appendChild(el);
     widgetEl = el;
 
-    // Populate country list
     populateList(cfg, activeCountry);
 
-    // Toggle dropdown
     const trigger = el.querySelector('#mc-trigger');
     const dropdown = el.querySelector('#mc-dropdown');
+    const searchInput = el.querySelector('#mc-search');
+
+    // Toggle dropdown
     trigger.addEventListener('click', (e) => {
       e.stopPropagation();
       const isOpen = dropdown.classList.contains('open');
       dropdown.classList.toggle('open', !isOpen);
       trigger.setAttribute('aria-expanded', String(!isOpen));
+      if (!isOpen) {
+        // Clear search and show all when opening
+        searchInput.value = '';
+        filterList(cfg, currentCountry, '');
+        setTimeout(() => searchInput.focus(), 50);
+      }
+    });
+
+    // Search / filter
+    searchInput.addEventListener('input', () => {
+      filterList(cfg, currentCountry, searchInput.value.trim());
+    });
+
+    // Keyboard: Escape closes
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        dropdown.classList.remove('open');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.focus();
+      }
     });
 
     // Close on outside click
@@ -391,14 +467,6 @@
       if (!el.contains(e.target)) {
         dropdown.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
-      }
-    });
-
-    // Keyboard support
-    trigger.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        trigger.click();
       }
     });
 
@@ -411,29 +479,55 @@
     list.innerHTML = '';
 
     cfg.countries.forEach(country => {
+      const isActive = activeCountry?.country_code === country.country_code;
+      const currency = cfg.currencies[country.currency_code];
+      const symbol = currency?.symbol || '';
+
       const btn = document.createElement('button');
-      btn.className = 'mc-item' + (activeCountry?.country_code === country.country_code ? ' active' : '');
+      btn.className = 'mc-item' + (isActive ? ' active' : '');
       btn.setAttribute('role', 'option');
-      btn.setAttribute('aria-selected', activeCountry?.country_code === country.country_code ? 'true' : 'false');
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      btn.dataset.search = `${country.country_name} ${country.country_code} ${country.currency_code}`.toLowerCase();
+
       btn.innerHTML = `
-        ${cfg.settings.showFlags ? `<span class="mc-flag">${country.flag_emoji || '🌐'}</span>` : ''}
-        <span class="mc-country-info">
-          <span class="mc-country-name">${country.country_name}</span>
-          <span class="mc-currency-code">${country.currency_code}</span>
+        <span class="mc-flag">${country.flag_emoji || '🌐'}</span>
+        <span class="mc-item-info">
+          <span class="mc-item-name">${country.country_name}</span>
+          <span class="mc-item-sub">
+            <span>${country.currency_code}</span>
+            ${symbol ? `<span>·</span><span>${symbol}</span>` : ''}
+          </span>
         </span>
+        <span class="mc-check">✓</span>
       `;
+
       btn.addEventListener('click', () => selectCountry(country, cfg));
       list.appendChild(btn);
     });
   }
 
+  function filterList(cfg, activeCountry, query) {
+    const q = query.toLowerCase();
+    const items = document.querySelectorAll('#mc-list .mc-item');
+    let visible = 0;
+
+    items.forEach(item => {
+      const matches = !q || item.dataset.search.includes(q);
+      item.hidden = !matches;
+      if (matches) visible++;
+    });
+
+    const noResults = document.getElementById('mc-no-results');
+    if (noResults) noResults.style.display = visible === 0 ? 'block' : 'none';
+  }
+
   function updateTriggerLabel(country, cfg) {
-    const s = cfg.settings;
-    const labelEl = document.getElementById('mc-active-label');
-    if (!labelEl) return;
-    labelEl.textContent = country
-      ? `${s.showFlags ? (country.flag_emoji || '🌐') + ' ' : ''}${s.showCountryName ? country.country_name : country.currency_code}`
-      : '🌐 Select';
+    const flagEl = document.getElementById('mc-trigger-flag');
+    const nameEl = document.getElementById('mc-trigger-name');
+    const codeEl = document.getElementById('mc-trigger-code');
+    if (flagEl) flagEl.textContent = country ? (country.flag_emoji || '🌐') : '🌐';
+    if (nameEl) nameEl.textContent = country ? country.country_name : 'Select';
+    if (codeEl) codeEl.textContent = country ? country.currency_code : '';
   }
 
   function selectCountry(country, cfg) {
@@ -442,17 +536,16 @@
     updateTriggerLabel(country, cfg);
     populateList(cfg, country);
 
-    // Close dropdown
     const dropdown = document.getElementById('mc-dropdown');
     const trigger = document.getElementById('mc-trigger');
     if (dropdown) dropdown.classList.remove('open');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
 
-    // Clear cached conversions and rewrite prices
     document.querySelectorAll('[data-mc-original]').forEach(el => {
       delete el.dataset.mcFormatted;
     });
     rewritePrices(country, cfg);
+    startObserver(country, cfg);
   }
 
   // ─── Main Init ───────────────────────────────────────────────────────────────
@@ -460,10 +553,8 @@
   async function init() {
     try {
       config = await loadConfig();
-
       if (!config.countries || config.countries.length === 0) return;
 
-      // Determine active country
       let activeCountry = resolveCountry(config);
 
       if (!activeCountry && config.settings.autoDetect) {
@@ -479,11 +570,8 @@
       }
 
       currentCountry = activeCountry;
-
-      // Build widget
       buildWidget(config, activeCountry);
 
-      // Initial price rewrite
       if (activeCountry) {
         rewritePrices(activeCountry, config);
         startObserver(activeCountry, config);
@@ -493,11 +581,9 @@
     }
   }
 
-  // Start after DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
-    // Give theme JS a moment to render prices
     setTimeout(init, 300);
   }
 })();
