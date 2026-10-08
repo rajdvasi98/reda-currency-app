@@ -20,7 +20,19 @@
   let observer = null;
   let widgetEl = null;
 
-  // ─── Utilities ──────────────────────────────────────────────────────────────
+  function countryCodeToFlag(code) {
+    if (!code || code.length !== 2) return '';
+    const offset = 0x1F1E6 - 65;
+    const first = code.charCodeAt(0);
+    const second = code.charCodeAt(1);
+    if (first < 65 || first > 90 || second < 65 || second > 90) return '';
+    return String.fromCodePoint(first + offset) + String.fromCodePoint(second + offset);
+  }
+
+  function getFlag(country) {
+    if (country.flag_emoji && country.flag_emoji.length > 1) return country.flag_emoji;
+    return countryCodeToFlag(country.country_code) || '🌐';
+  }
 
   function getCachedConfig() {
     try {
@@ -46,8 +58,6 @@
     try { localStorage.setItem(STORAGE_KEY, code); } catch {}
   }
 
-  // ─── Config Loading ──────────────────────────────────────────────────────────
-
   async function loadConfig() {
     const cached = getCachedConfig();
     if (cached) return cached;
@@ -57,8 +67,6 @@
     setCachedConfig(data);
     return data;
   }
-
-  // ─── Country Detection ───────────────────────────────────────────────────────
 
   async function detectCountry(cfg) {
     if (!cfg.settings.autoDetect) return null;
@@ -78,8 +86,6 @@
     }
     return null;
   }
-
-  // ─── Price Formatting ────────────────────────────────────────────────────────
 
   function formatPrice(amount, currencyCode, cfg) {
     const currency = cfg.currencies[currencyCode];
@@ -111,8 +117,6 @@
     return isNaN(val) ? null : val;
   }
 
-  // ─── Price Conversion ────────────────────────────────────────────────────────
-
   function convertAmount(baseAmount, baseCurrency, countryConfig, cfg) {
     if (!countryConfig) return { price: baseAmount, currency: baseCurrency };
     const targetCurrency = countryConfig.currency_code;
@@ -140,8 +144,6 @@
       default: return price;
     }
   }
-
-  // ─── DOM Price Rewriting ─────────────────────────────────────────────────────
 
   const PRICE_SELECTORS = [
     '.money', '.price', '[data-product-price]', '[data-cart-price]',
@@ -185,225 +187,225 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  // ─── Widget UI ───────────────────────────────────────────────────────────────
-
   function buildWidget(cfg, activeCountry) {
     const s = cfg.settings;
     const isLeft = !s.widgetPosition || s.widgetPosition === 'bottom-left';
-    const bg = s.widgetBgColor || '#1a1a2e';
-    const fg = s.widgetTextColor || '#ffffff';
-    const accent = s.widgetAccentColor || '#e94560';
 
     const el = document.createElement('div');
     el.id = 'mc-currency-widget';
     el.setAttribute('role', 'region');
     el.setAttribute('aria-label', 'Currency selector');
 
-    const styles = `
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
       #mc-currency-widget {
         position: fixed;
-        ${isLeft ? 'left: 16px' : 'right: 16px'};
-        bottom: 16px;
+        ${isLeft ? 'left: 18px' : 'right: 18px'};
+        bottom: 18px;
         z-index: 2147483647;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
         font-size: 14px;
+        line-height: 1.4;
+        -webkit-font-smoothing: antialiased;
       }
       #mc-currency-widget * { box-sizing: border-box; margin: 0; padding: 0; }
 
-      /* ── Trigger Button ── */
       .mc-trigger {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        gap: 8px;
-        background: ${bg};
-        color: ${fg};
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 28px;
-        padding: 9px 16px 9px 12px;
+        gap: 10px;
+        background: #fff;
+        color: #1a1a1a;
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 50px;
+        padding: 10px 18px 10px 14px;
         cursor: pointer;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 500;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
-        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         white-space: nowrap;
         user-select: none;
-        min-width: 0;
       }
       .mc-trigger:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.2);
-        border-color: rgba(255,255,255,0.22);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+        transform: translateY(-1px);
       }
       .mc-trigger:active { transform: translateY(0); }
-      .mc-trigger-flag { font-size: 20px; line-height: 1; flex-shrink: 0; }
-      .mc-trigger-info { display: flex; flex-direction: column; line-height: 1.25; text-align: left; }
-      .mc-trigger-name { font-size: 12px; font-weight: 600; }
-      .mc-trigger-code { font-size: 10px; opacity: 0.6; font-weight: 400; margin-top: 1px; }
+      .mc-trigger-flag { font-size: 22px; line-height: 1; flex-shrink: 0; }
+      .mc-trigger-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mc-trigger-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1a1a1a;
+      }
+      .mc-trigger-code {
+        font-size: 12px;
+        font-weight: 500;
+        color: #888;
+        background: #f3f3f3;
+        padding: 2px 7px;
+        border-radius: 4px;
+      }
       .mc-trigger-chevron {
         flex-shrink: 0;
-        opacity: 0.5;
-        transition: transform 0.2s ease;
+        color: #999;
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         margin-left: 2px;
       }
       .mc-trigger[aria-expanded="true"] .mc-trigger-chevron { transform: rotate(180deg); }
 
-      /* ── Dropdown ── */
       .mc-dropdown {
         position: absolute;
         ${isLeft ? 'left: 0' : 'right: 0'};
-        bottom: calc(100% + 10px);
-        background: ${bg};
-        border: 1px solid rgba(255,255,255,0.1);
+        bottom: calc(100% + 8px);
+        background: #fff;
+        border: 1px solid rgba(0,0,0,0.06);
         border-radius: 16px;
-        box-shadow: 0 16px 48px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.2);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.06);
         overflow: hidden;
-        min-width: 260px;
-        max-height: 380px;
+        min-width: 300px;
+        max-height: 420px;
         display: none;
         flex-direction: column;
-        animation: mc-slide-up 0.18s ease;
+        animation: mc-pop-up 0.25s cubic-bezier(0.32, 0.72, 0, 1);
       }
-      @keyframes mc-slide-up {
-        from { opacity: 0; transform: translateY(6px); }
-        to   { opacity: 1; transform: translateY(0); }
+      @keyframes mc-pop-up {
+        from { opacity: 0; transform: translateY(8px) scale(0.96); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
       }
       .mc-dropdown.open { display: flex; }
 
-      /* ── Dropdown Header ── */
       .mc-header {
-        padding: 14px 14px 10px;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid #f0f0f0;
       }
       .mc-header-title {
-        font-size: 10px;
+        font-size: 13px;
         font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1.2px;
-        color: ${accent};
-        margin-bottom: 10px;
+        color: #1a1a1a;
+        margin-bottom: 12px;
       }
 
-      /* ── Search Box ── */
       .mc-search-wrap {
         display: flex;
         align-items: center;
         gap: 8px;
-        background: rgba(255,255,255,0.08);
-        border: 1px solid rgba(255,255,255,0.1);
+        background: #f7f7f8;
+        border: 1.5px solid transparent;
         border-radius: 10px;
-        padding: 7px 10px;
-        transition: border-color 0.15s;
+        padding: 9px 12px;
+        transition: all 0.15s ease;
       }
       .mc-search-wrap:focus-within {
-        border-color: ${accent};
-        background: rgba(255,255,255,0.1);
+        border-color: #3b82f6;
+        background: #fff;
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
       }
-      .mc-search-icon { opacity: 0.45; flex-shrink: 0; }
+      .mc-search-icon { color: #999; flex-shrink: 0; }
       .mc-search {
         background: none;
         border: none;
         outline: none;
-        color: ${fg};
-        font-size: 12px;
+        color: #1a1a1a;
+        font-size: 13px;
         font-family: inherit;
         width: 100%;
-        caret-color: ${accent};
       }
-      .mc-search::placeholder { opacity: 0.4; }
+      .mc-search::placeholder { color: #aaa; }
 
-      /* ── Country List ── */
       .mc-list {
         overflow-y: auto;
         flex: 1;
-        padding: 4px 0;
+        padding: 6px;
         scrollbar-width: thin;
-        scrollbar-color: rgba(255,255,255,0.15) transparent;
+        scrollbar-color: #ddd transparent;
       }
-      .mc-list::-webkit-scrollbar { width: 4px; }
+      .mc-list::-webkit-scrollbar { width: 5px; }
       .mc-list::-webkit-scrollbar-track { background: transparent; }
-      .mc-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+      .mc-list::-webkit-scrollbar-thumb { background: #ddd; border-radius: 5px; }
 
-      /* ── List Item ── */
       .mc-item {
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 8px 14px;
+        gap: 12px;
+        padding: 10px 12px;
         cursor: pointer;
-        color: ${fg};
+        color: #333;
         border: none;
         background: none;
         width: 100%;
         text-align: left;
-        font-size: 13px;
+        font-size: 14px;
         font-family: inherit;
-        transition: background 0.1s;
+        border-radius: 10px;
+        transition: background 0.12s ease;
         position: relative;
       }
-      .mc-item:hover { background: rgba(255,255,255,0.07); }
-      .mc-item.active { background: rgba(255,255,255,0.1); }
-      .mc-item.active .mc-check {
-        opacity: 1;
-        color: ${accent};
-      }
+      .mc-item:hover { background: #f5f5f7; }
+      .mc-item.active { background: #eff6ff; }
       .mc-item[hidden] { display: none; }
-      .mc-flag { font-size: 20px; line-height: 1; flex-shrink: 0; width: 26px; text-align: center; }
+      .mc-flag { font-size: 24px; line-height: 1; flex-shrink: 0; }
       .mc-item-info { flex: 1; min-width: 0; }
       .mc-item-name {
         font-weight: 500;
-        font-size: 13px;
+        font-size: 14px;
+        color: #1a1a1a;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .mc-item-sub {
-        font-size: 10px;
-        opacity: 0.5;
+        font-size: 12px;
+        color: #888;
         margin-top: 1px;
-        display: flex;
-        gap: 4px;
-        align-items: center;
       }
       .mc-check {
         flex-shrink: 0;
         opacity: 0;
-        font-size: 13px;
-        font-weight: 700;
         transition: opacity 0.15s;
       }
+      .mc-item.active .mc-check { opacity: 1; }
 
-      /* ── No Results ── */
       .mc-no-results {
-        padding: 16px;
+        padding: 24px 16px;
         text-align: center;
-        font-size: 12px;
-        opacity: 0.45;
+        font-size: 13px;
+        color: #999;
         display: none;
       }
-    `;
 
-    const styleEl = document.createElement('style');
-    styleEl.textContent = styles;
+      @media (max-width: 480px) {
+        .mc-dropdown { min-width: 280px; max-height: 360px; }
+        .mc-trigger { padding: 8px 14px 8px 10px; }
+        .mc-trigger-flag { font-size: 20px; }
+        .mc-trigger-name { font-size: 13px; }
+      }
+    `;
     document.head.appendChild(styleEl);
 
-    const flag = activeCountry ? (activeCountry.flag_emoji || '🌐') : '🌐';
+    const flag = activeCountry ? getFlag(activeCountry) : '🌐';
     const name = activeCountry ? activeCountry.country_name : 'Select';
     const code = activeCountry ? activeCountry.currency_code : '';
 
     el.innerHTML = `
       <div class="mc-dropdown" id="mc-dropdown" role="listbox" aria-label="Select country">
         <div class="mc-header">
-          <div class="mc-header-title">Select Country / Currency</div>
+          <div class="mc-header-title">Select Country</div>
           <div class="mc-search-wrap">
-            <svg class="mc-search-icon" width="13" height="13" fill="none" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="7" stroke="${fg}" stroke-width="2"/>
-              <path d="M16.5 16.5l4 4" stroke="${fg}" stroke-width="2" stroke-linecap="round"/>
+            <svg class="mc-search-icon" width="15" height="15" fill="none" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <path d="M16.5 16.5l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <input
               class="mc-search"
               id="mc-search"
               type="text"
-              placeholder="Search country or currency…"
+              placeholder="Search country or currency..."
               autocomplete="off"
               spellcheck="false"
               aria-label="Search countries"
@@ -419,7 +421,7 @@
           <span class="mc-trigger-name" id="mc-trigger-name">${name}</span>
           ${code ? `<span class="mc-trigger-code" id="mc-trigger-code">${code}</span>` : ''}
         </span>
-        <svg class="mc-trigger-chevron" width="11" height="11" fill="none" viewBox="0 0 24 24">
+        <svg class="mc-trigger-chevron" width="12" height="12" fill="none" viewBox="0 0 24 24">
           <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
@@ -434,26 +436,22 @@
     const dropdown = el.querySelector('#mc-dropdown');
     const searchInput = el.querySelector('#mc-search');
 
-    // Toggle dropdown
     trigger.addEventListener('click', (e) => {
       e.stopPropagation();
       const isOpen = dropdown.classList.contains('open');
       dropdown.classList.toggle('open', !isOpen);
       trigger.setAttribute('aria-expanded', String(!isOpen));
       if (!isOpen) {
-        // Clear search and show all when opening
         searchInput.value = '';
         filterList(cfg, currentCountry, '');
         setTimeout(() => searchInput.focus(), 50);
       }
     });
 
-    // Search / filter
     searchInput.addEventListener('input', () => {
       filterList(cfg, currentCountry, searchInput.value.trim());
     });
 
-    // Keyboard: Escape closes
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         dropdown.classList.remove('open');
@@ -462,7 +460,6 @@
       }
     });
 
-    // Close on outside click
     document.addEventListener('click', (e) => {
       if (!el.contains(e.target)) {
         dropdown.classList.remove('open');
@@ -482,6 +479,7 @@
       const isActive = activeCountry?.country_code === country.country_code;
       const currency = cfg.currencies[country.currency_code];
       const symbol = currency?.symbol || '';
+      const flag = getFlag(country);
 
       const btn = document.createElement('button');
       btn.className = 'mc-item' + (isActive ? ' active' : '');
@@ -490,15 +488,16 @@
       btn.dataset.search = `${country.country_name} ${country.country_code} ${country.currency_code}`.toLowerCase();
 
       btn.innerHTML = `
-        <span class="mc-flag">${country.flag_emoji || '🌐'}</span>
+        <span class="mc-flag">${flag}</span>
         <span class="mc-item-info">
           <span class="mc-item-name">${country.country_name}</span>
-          <span class="mc-item-sub">
-            <span>${country.currency_code}</span>
-            ${symbol ? `<span>·</span><span>${symbol}</span>` : ''}
-          </span>
+          <span class="mc-item-sub">${country.currency_code}${symbol ? ' · ' + symbol : ''}</span>
         </span>
-        <span class="mc-check">✓</span>
+        <span class="mc-check">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
+            <path d="M5 13l4 4L19 7" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
       `;
 
       btn.addEventListener('click', () => selectCountry(country, cfg));
@@ -525,7 +524,7 @@
     const flagEl = document.getElementById('mc-trigger-flag');
     const nameEl = document.getElementById('mc-trigger-name');
     const codeEl = document.getElementById('mc-trigger-code');
-    if (flagEl) flagEl.textContent = country ? (country.flag_emoji || '🌐') : '🌐';
+    if (flagEl) flagEl.textContent = country ? getFlag(country) : '🌐';
     if (nameEl) nameEl.textContent = country ? country.country_name : 'Select';
     if (codeEl) codeEl.textContent = country ? country.currency_code : '';
   }
@@ -547,8 +546,6 @@
     rewritePrices(country, cfg);
     startObserver(country, cfg);
   }
-
-  // ─── Main Init ───────────────────────────────────────────────────────────────
 
   async function init() {
     try {
