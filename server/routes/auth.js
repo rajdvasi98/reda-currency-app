@@ -34,9 +34,8 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
   if (!shop || !code) return res.status(400).send('Missing required parameters');
   if (!validateShopDomain(shop)) return res.status(400).send('Invalid shop domain');
 
-  // CSRF state check (best-effort — cookies may not persist across browser redirects in some setups)
   const savedState = req.cookies?.shopify_oauth_state;
-  if (savedState && savedState !== state) {
+  if (!savedState || savedState !== state) {
     return res.status(403).send('State mismatch — possible CSRF');
   }
 

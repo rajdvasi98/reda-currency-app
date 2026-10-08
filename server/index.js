@@ -3,6 +3,7 @@ import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initDb, dbGet } from './database/init.js';
@@ -71,6 +72,14 @@ app.use('/admin', express.static(join(__dirname, '../dist/client')));
 
 // Webhooks (raw body needed — registered before JSON middleware)
 app.use('/api/webhooks', webhookRoutes);
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', apiLimiter);
 
 // Resolve shop identity from session token or headers for all API routes
 app.use('/api', resolveShop);
