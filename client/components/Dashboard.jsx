@@ -2,19 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api.js';
 import { Flag } from './common.jsx';
 
-const EXTENSION_HANDLE = 'currency-widget';
 const EMBED_HANDLE = 'app-embed';
 
 async function getEmbedStatus() {
   if (!window.shopify?.app?.extensions) return 'unknown';
   try {
     const extensions = await window.shopify.app.extensions();
-    window.__mcExtensions = extensions;
-    const ext = extensions.find(e => e.type === 'theme_app_extension' && e.handle === EXTENSION_HANDLE);
-    const embed = ext?.activations?.find(a => a.handle === EMBED_HANDLE);
+    // Shopify reports this extension under its own handle, so match the embed block by its file handle.
+    const embed = extensions
+      .filter(e => e.type === 'theme_app_extension')
+      .flatMap(e => e.activations || [])
+      .find(a => a.handle === EMBED_HANDLE);
     return embed?.status === 'active' ? 'active' : 'inactive';
-  } catch (err) {
-    window.__mcExtensions = { error: String(err) };
+  } catch {
     return 'unknown';
   }
 }
@@ -55,9 +55,6 @@ function WidgetSetupCard({ shopDomain }) {
         <p style={{ fontSize: 13, color: 'var(--text2)', margin: '12px 0' }}>
           Visitors now see the currency selector in the bottom corner of your store. To turn it off, switch off the app embed in the theme editor.
         </p>
-      )}
-      {new URLSearchParams(window.location.search).has('mcdebug') && status !== 'loading' && (
-        <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(window.__mcExtensions, null, 1)}</pre>
       )}
       <button className={`btn ${active ? 'btn-secondary' : 'btn-primary'}`} onClick={() => window.open(editorUrl, '_blank')}>
         {active ? 'Open theme editor' : 'Enable in theme editor'}
