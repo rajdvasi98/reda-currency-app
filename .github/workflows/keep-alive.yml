@@ -1,14 +1,29 @@
 name: Keep Render Alive
 
+# Render's free plan sleeps after 15 idle minutes. GitHub delays scheduled runs by hours,
+# so each run keeps pinging for ~6 hours and the next one queues behind it.
 on:
   schedule:
-    - cron: '*/10 * * * *'  # every 10 minutes
-  workflow_dispatch:          # allow manual trigger
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/keep-alive.yml']
+
+concurrency:
+  group: keep-render-alive
+  cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
-      - name: Ping health endpoint
+      - name: Ping health endpoint every 5 minutes
         run: |
-          curl -sf https://reda-currency-app.onrender.com/health || echo "Service waking up"
+          end=$((SECONDS + 340 * 60))
+          while [ "$SECONDS" -lt "$end" ]; do
+            curl -s -o /dev/null --max-time 90 -w "%{http_code} in %{time_total}s\n" \
+              https://reda-currency-app.onrender.com/health || echo "ping failed"
+            sleep 300
+          done
