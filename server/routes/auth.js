@@ -40,7 +40,6 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
   }
 
   try {
-    // Exchange code for expiring offline access token
     const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -52,53 +51,8 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
       }),
     });
     if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
-    const tokenData = await tokenRes.json();
-    const { access_token, refresh_token, expires_in } = tokenData;
-    const tokenExpiresAt = expires_in
-      ? new Date(Date.now() + expires_in * 1000).toISOString()
-      : null;
+    await setupShop(shop, await tokenRes.json());
 
-    // Fetch shop info (currency, etc.)
-    const shopInfoRes = await fetch(`https://${shop}/admin/api/2026-04/shop.json`, {
-      headers: { 'X-Shopify-Access-Token': access_token },
-    });
-    const shopData = await shopInfoRes.json();
-    const defaultCurrency = shopData?.shop?.currency || 'USD';
-
-    // Upsert shop
-    await dbRun(`
-      INSERT INTO shops (shop_domain, access_token, refresh_token, token_expires_at, default_currency, is_active)
-      VALUES ($1, $2, $3, $4, $5, 1)
-      ON CONFLICT(shop_domain) DO UPDATE SET
-        access_token = excluded.access_token,
-        refresh_token = excluded.refresh_token,
-        token_expires_at = excluded.token_expires_at,
-        default_currency = excluded.default_currency,
-        is_active = 1, updated_at = NOW()
-    `, [shop, access_token, refresh_token || null, tokenExpiresAt, defaultCurrency]);
-
-    const shopRow = await dbGet('SELECT id FROM shops WHERE shop_domain = $1', [shop]);
-    const shopId = shopRow.id;
-
-    // Default settings
-    await dbRun('INSERT INTO settings (shop_id) VALUES ($1) ON CONFLICT DO NOTHING', [shopId]);
-
-    // Seed default countries
-    for (const c of defaultCountries) {
-      await dbRun(`
-        INSERT INTO countries (shop_id, country_code, country_name, currency_code, flag_emoji)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT DO NOTHING
-      `, [shopId, c.country_code, c.country_name, c.currency_code, c.flag_emoji]);
-    }
-
-    // Register mandatory GDPR + billing webhooks
-    await registerWebhooks(shop, access_token);
-
-    // Fetch initial exchange rates
-    await fetchAndStoreRates(shopId, defaultCurrency);
-
-    // Clear CSRF cookie
     res.clearCookie('shopify_oauth_state');
 
     // Redirect to embedded app
@@ -110,21 +64,34 @@ router.get('/callback', verifyOAuthHmac, async (req, res) => {
 });
 
 /**
- * GET /api/auth/session?shop=
- * Check if shop is installed (used by admin UI on load).
+ * GET /api/auth/session
+ * Called by the admin UI on load. With Shopify managed installation the shop may not
+ * be in our DB yet, so exchange the App Bridge session token for an access token.
  */
 router.get('/session', async (req, res) => {
-  const shop = req.query.shop || req.headers['x-shopify-shop-domain'];
+  const shop = req.shopAuthenticated
+    ? req.shopDomain
+    : (req.query.shop || req.headers['x-shopify-shop-domain']);
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
   if (!validateShopDomain(shop)) return res.status(400).json({ error: 'Invalid shop domain' });
 
-  const shopRow = await dbGet(
+  const selectShop = () => dbGet(
     'SELECT id, shop_domain, default_currency, is_active FROM shops WHERE shop_domain = $1',
     [shop]
   );
+  let shopRow = await selectShop();
 
   if (!shopRow || !shopRow.is_active) {
-    return res.status(401).json({ error: 'Shop not installed', installUrl: `/api/auth/install?shop=${shop}` });
+    if (!req.shopAuthenticated) {
+      return res.status(401).json({ error: 'Shop not installed. Open the app from your Shopify admin.' });
+    }
+    try {
+      await setupShop(shop, await exchangeSessionToken(shop, req.sessionToken));
+    } catch (err) {
+      console.error('[Auth] Token exchange setup failed:', err.message);
+      return res.status(500).json({ error: 'Could not finish setting up the app. Please reload the page.' });
+    }
+    shopRow = await selectShop();
   }
 
   // Include subscription status
@@ -132,6 +99,67 @@ router.get('/session', async (req, res) => {
 
   res.json({ shop: shopRow, subscription: sub || null });
 });
+
+async function exchangeSessionToken(shop, sessionToken) {
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      client_id: process.env.SHOPIFY_API_KEY,
+      client_secret: process.env.SHOPIFY_API_SECRET,
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: sessionToken,
+      subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+      requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+      expiring: '1',
+    }),
+  });
+  if (!res.ok) throw new Error(`Token exchange failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function setupShop(shop, { access_token, refresh_token, expires_in }) {
+  const tokenExpiresAt = expires_in
+    ? new Date(Date.now() + expires_in * 1000).toISOString()
+    : null;
+
+  const shopInfoRes = await fetch(`https://${shop}/admin/api/2026-04/shop.json`, {
+    headers: { 'X-Shopify-Access-Token': access_token },
+  });
+  const shopData = await shopInfoRes.json();
+  const defaultCurrency = shopData?.shop?.currency || 'USD';
+
+  await dbRun(`
+    INSERT INTO shops (shop_domain, access_token, refresh_token, token_expires_at, default_currency, is_active)
+    VALUES ($1, $2, $3, $4, $5, 1)
+    ON CONFLICT(shop_domain) DO UPDATE SET
+      access_token = excluded.access_token,
+      refresh_token = excluded.refresh_token,
+      token_expires_at = excluded.token_expires_at,
+      default_currency = excluded.default_currency,
+      is_active = 1, updated_at = NOW()
+  `, [shop, access_token, refresh_token || null, tokenExpiresAt, defaultCurrency]);
+
+  const { id: shopId } = await dbGet('SELECT id FROM shops WHERE shop_domain = $1', [shop]);
+
+  await dbRun('INSERT INTO settings (shop_id) VALUES ($1) ON CONFLICT DO NOTHING', [shopId]);
+
+  for (const c of defaultCountries) {
+    await dbRun(`
+      INSERT INTO countries (shop_id, country_code, country_name, currency_code, flag_emoji)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT DO NOTHING
+    `, [shopId, c.country_code, c.country_name, c.currency_code, c.flag_emoji]);
+  }
+
+  await registerWebhooks(shop, access_token);
+
+  try {
+    await fetchAndStoreRates(shopId, defaultCurrency);
+  } catch (err) {
+    console.warn('[Auth] Initial rate fetch failed:', err.message);
+  }
+}
 
 /**
  * Register all mandatory Shopify webhooks for this shop.

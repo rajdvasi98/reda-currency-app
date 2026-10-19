@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDb, dbGet } from './database/init.js';
+import { initDb } from './database/init.js';
 import authRoutes from './routes/auth.js';
 import { resolveShop } from './middleware/sessionToken.js';
 import countriesRoutes from './routes/countries.js';
@@ -177,19 +177,9 @@ const adminFallback = (req, res) => {
 };
 app.get('/admin', adminFallback);
 
-// Embedded app entry point — redirect to OAuth if shop is not installed
-app.get('/app*', async (req, res) => {
-  const shop = req.query.shop;
-  if (shop) {
-    try {
-      const shopRow = await dbGet('SELECT is_active FROM shops WHERE shop_domain = $1', [shop]);
-      if (!shopRow || !shopRow.is_active) {
-        return res.redirect(`/api/auth/install?shop=${encodeURIComponent(shop)}`);
-      }
-    } catch {}
-  }
-  adminFallback(req, res);
-});
+// Embedded app entry point. Shopify managed installation means the shop may not be in
+// our DB yet; the admin UI obtains an access token via session-token exchange.
+app.get('/app*', adminFallback);
 
 // Root install redirect
 app.get('/', (req, res) => {

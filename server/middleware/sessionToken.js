@@ -23,8 +23,12 @@ function verifySessionToken(token) {
 
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
 
-    // Check expiry
-    if (claims.exp && Date.now() / 1000 > claims.exp) return null;
+    const now = Date.now() / 1000;
+    if (!claims.exp || now > claims.exp) return null;
+    if (claims.nbf && now < claims.nbf) return null;
+    if (claims.aud !== process.env.SHOPIFY_API_KEY) return null;
+    if (!claims.iss || !claims.dest) return null;
+    if (new URL(claims.iss).hostname !== new URL(claims.dest).hostname) return null;
 
     return claims;
   } catch {
@@ -45,6 +49,7 @@ export function resolveShop(req, res, next) {
       try {
         req.shopDomain = new URL(claims.dest).hostname;
         req.shopAuthenticated = true;
+        req.sessionToken = token;
       } catch {
         req.shopDomain = '';
         req.shopAuthenticated = false;
