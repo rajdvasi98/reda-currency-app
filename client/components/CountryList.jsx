@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api.js';
+import { Flag, ConfirmDeleteButton } from './common.jsx';
 
 const ALL_COUNTRIES = [
   { code: 'AF', name: 'Afghanistan', flag: '🇦🇫' }, { code: 'AE', name: 'United Arab Emirates', flag: '🇦🇪' },
@@ -64,7 +65,7 @@ function CountryModal({ onClose, onSave, currencies, initialData }) {
             <label className="form-label">Country</label>
             <select className="form-select" value={form.country_code} onChange={e => setCountry(e.target.value)}>
               <option value="">Select a country…</option>
-              {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.name}</option>)}
+              {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </div>
         )}
@@ -72,8 +73,8 @@ function CountryModal({ onClose, onSave, currencies, initialData }) {
         {isEdit && (
           <div className="form-group">
             <label className="form-label">Country</label>
-            <div style={{ padding: '9px 12px', background: 'var(--bg3)', borderRadius: 8, fontSize: 13 }}>
-              {form.flag_emoji} {form.country_name} ({form.country_code})
+            <div style={{ padding: '9px 12px', background: 'var(--bg3)', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Flag code={form.country_code} size={18} /> {form.country_name} ({form.country_code})
             </div>
           </div>
         )}
@@ -158,15 +159,22 @@ export default function CountryList() {
   }
 
   async function handleToggle(country) {
-    const updated = await api.updateCountry(country.id, { is_enabled: country.is_enabled ? 0 : 1 });
-    setCountries(prev => prev.map(c => c.id === updated.id ? updated : c));
+    try {
+      const updated = await api.updateCountry(country.id, { is_enabled: country.is_enabled ? 0 : 1 });
+      setCountries(prev => prev.map(c => c.id === updated.id ? updated : c));
+    } catch (err) {
+      showAlert(err.message, 'error');
+    }
   }
 
   async function handleDelete(id) {
-    if (!confirm('Remove this country?')) return;
-    await api.deleteCountry(id);
-    setCountries(prev => prev.filter(c => c.id !== id));
-    showAlert('Country removed');
+    try {
+      await api.deleteCountry(id);
+      setCountries(prev => prev.filter(c => c.id !== id));
+      showAlert('Country removed');
+    } catch (err) {
+      showAlert(err.message, 'error');
+    }
   }
 
   if (loading) return <div style={{ color: 'var(--text2)', padding: 20 }}>Loading…</div>;
@@ -211,7 +219,7 @@ export default function CountryList() {
               ) : countries.map(c => (
                 <tr key={c.id}>
                   <td>
-                    <span style={{ marginRight: 8, fontSize: 18 }}>{c.flag_emoji || '🌐'}</span>
+                    <span style={{ marginRight: 8 }}><Flag code={c.country_code} size={20} /></span>
                     <strong>{c.country_name}</strong>
                     <span style={{ color: 'var(--text2)', marginLeft: 6, fontSize: 12 }}>{c.country_code}</span>
                   </td>
@@ -235,7 +243,7 @@ export default function CountryList() {
                       <button className="btn btn-secondary btn-sm" onClick={() => handleToggle(c)}>
                         {c.is_enabled ? 'Disable' : 'Enable'}
                       </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(c.id)}>✕</button>
+                      <ConfirmDeleteButton ariaLabel={`Remove ${c.country_name}`} onConfirm={() => handleDelete(c.id)} />
                     </div>
                   </td>
                 </tr>

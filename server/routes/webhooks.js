@@ -29,7 +29,8 @@ router.post('/app/uninstalled', async (req, res) => {
       'UPDATE shops SET is_active = 0, updated_at = NOW() WHERE shop_domain = $1',
       [shop]
     );
-
+    // Shopify cancels app subscriptions on uninstall; a reinstall must approve a plan again.
+    await dbRun('DELETE FROM subscriptions WHERE shop_id = $1', [shopRow.id]);
   }
 
   res.status(200).json({ ok: true });
@@ -134,14 +135,14 @@ router.post('/app_subscriptions/update', async (req, res) => {
   const shop = req.headers['x-shopify-shop-domain'];
   const { app_subscription } = req.body;
 
-  if (app_subscription) {
+  if (app_subscription?.admin_graphql_api_id) {
     const shopRow = await dbGet('SELECT id FROM shops WHERE shop_domain = $1', [shop]);
-    if (shopRow) {
-      const status = app_subscription.status?.toLowerCase();
-      await dbRun(`
-        UPDATE subscriptions SET status = $1, updated_at = NOW()
-        WHERE shop_id = $2 AND shopify_charge_id LIKE $3
-      `, [status, shopRow.id, `%${app_subscription.id}%`]);
+    if (shopRow && app_subscription.status !== 'ACTIVE') {
+      // Only active subscriptions are kept locally; the next admin load re-syncs from Shopify.
+      await dbRun(
+        'DELETE FROM subscriptions WHERE shop_id = $1 AND shopify_charge_id = $2',
+        [shopRow.id, app_subscription.admin_graphql_api_id]
+      );
     }
   }
 

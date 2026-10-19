@@ -23,11 +23,9 @@ export default function App() {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [declined] = useState(() => new URLSearchParams(window.location.search).get('subscribed') === '0');
 
   useEffect(() => {
-    // Check for post-subscription redirect
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('subscribed') === '1') setPage('billing');
 
     if (!shop) {
       setError('No shop domain found. Please access this app from your Shopify admin.');
@@ -68,8 +66,9 @@ export default function App() {
     );
   }
 
-  const subStatus = subscription?.status;
-  const hasActiveSub = subStatus === 'active' || subStatus === 'pending';
+  const hasActiveSub = subscription?.status === 'active';
+  const navItems = hasActiveSub ? NAV_ITEMS : NAV_ITEMS.filter(item => item.id === 'billing');
+  const currentPage = hasActiveSub ? page : 'billing';
 
   return (
     <div className="app-shell">
@@ -83,39 +82,32 @@ export default function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(item => (
+          {navItems.map(item => (
             <button
               key={item.id}
-              className={`nav-item ${page === item.id ? 'active' : ''}`}
+              className={`nav-item ${currentPage === item.id ? 'active' : ''}`}
               onClick={() => setPage(item.id)}
             >
               {item.label}
-              {item.id === 'billing' && !hasActiveSub && (
-                <span style={{ marginLeft: 'auto', fontSize: 10, background: 'var(--accent2)', color: '#fff', padding: '2px 6px', borderRadius: 10 }}>
-                  Trial
-                </span>
-              )}
             </button>
           ))}
         </nav>
 
         <div className="sidebar-footer">
           <div className="currency-badge">{shopData?.default_currency || 'USD'} base</div>
-          {subStatus && (
-            <div className={`badge ${hasActiveSub ? 'badge-green' : 'badge-red'}`} style={{ marginTop: 8, display: 'block' }}>
-              {subStatus === 'active' ? `✓ ${subscription.plan}` : subStatus}
-            </div>
-          )}
+          <div className={`badge ${hasActiveSub ? 'badge-green' : 'badge-red'}`} style={{ marginTop: 8, display: 'block' }}>
+            {hasActiveSub ? `✓ ${subscription.plan} plan` : 'No plan selected'}
+          </div>
         </div>
       </aside>
 
       <main className="main-content">
-        {page === 'dashboard' && <Dashboard shopData={shopData} subscription={subscription} onNavigate={setPage} />}
-        {page === 'countries' && <CountryList />}
-        {page === 'rates' && <ExchangeRates shopData={shopData} />}
-        {page === 'rules' && <PricingRules />}
-        {page === 'settings' && <Settings />}
-        {page === 'billing' && <Billing subscription={subscription} />}
+        {currentPage === 'dashboard' && <Dashboard shopData={shopData} onNavigate={setPage} />}
+        {currentPage === 'countries' && <CountryList />}
+        {currentPage === 'rates' && <ExchangeRates shopData={shopData} />}
+        {currentPage === 'rules' && <PricingRules />}
+        {currentPage === 'settings' && <Settings />}
+        {currentPage === 'billing' && <Billing subscription={subscription} declined={declined} />}
       </main>
     </div>
   );

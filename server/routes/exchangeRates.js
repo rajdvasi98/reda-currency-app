@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { dbGet } from '../database/init.js';
-import { requireShopAuth } from '../middleware/shopAuth.js';
+import { requireShopAuth, requireActivePlan } from '../middleware/shopAuth.js';
 import { fetchAndStoreRates, getRatesForShop, setManualRate } from '../services/exchangeRate.js';
 
 const router = Router();
-router.use(requireShopAuth);
+router.use(requireShopAuth, requireActivePlan);
 
 // GET /api/exchange-rates
 router.get('/', async (req, res) => {

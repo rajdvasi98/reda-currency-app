@@ -14,7 +14,7 @@ export function getPool() { return pool; }
 // Convert PostgreSQL $1/$2 placeholders and NOW() to SQLite equivalents
 function pgToSqlite(sql) {
   return sql
-    .replace(/\$\d+/g, '?')
+    .replace(/\$(\d+)/g, '?$1')
     .replace(/\bNOW\(\)/gi, "datetime('now')");
 }
 
@@ -27,6 +27,13 @@ export async function initDb() {
     });
     const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
     await pool.query(schema);
+    await pool.query(`
+      ALTER TABLE settings ALTER COLUMN widget_bg_color SET DEFAULT '#ffffff';
+      ALTER TABLE settings ALTER COLUMN widget_text_color SET DEFAULT '#1a1a1a';
+      ALTER TABLE settings ALTER COLUMN widget_accent_color SET DEFAULT '#3b82f6';
+      UPDATE settings SET widget_bg_color = '#ffffff', widget_text_color = '#1a1a1a', widget_accent_color = '#3b82f6'
+        WHERE widget_bg_color = '#1a1a2e' AND widget_text_color = '#ffffff' AND widget_accent_color = '#e94560';
+    `);
     await seedCurrencies();
     console.log('Database initialized (PostgreSQL)');
   } else {
@@ -62,9 +69,12 @@ function seedCurrenciesSqlite() {
   stmt.free();
 }
 
+// pg sends undefined as NULL; sql.js throws on it.
+const toSqliteParams = params => params.map(v => (v === undefined ? null : v));
+
 function sqliteGetOne(sql, params) {
   const stmt = sqliteDb.prepare(pgToSqlite(sql));
-  stmt.bind(params);
+  stmt.bind(toSqliteParams(params));
   const row = stmt.step() ? stmt.getAsObject() : null;
   stmt.free();
   return row;
@@ -72,7 +82,7 @@ function sqliteGetOne(sql, params) {
 
 function sqliteGetAll(sql, params) {
   const stmt = sqliteDb.prepare(pgToSqlite(sql));
-  stmt.bind(params);
+  stmt.bind(toSqliteParams(params));
   const rows = [];
   while (stmt.step()) rows.push(stmt.getAsObject());
   stmt.free();
@@ -80,7 +90,7 @@ function sqliteGetAll(sql, params) {
 }
 
 function sqliteExec(sql, params) {
-  sqliteDb.run(pgToSqlite(sql), params);
+  sqliteDb.run(pgToSqlite(sql), toSqliteParams(params));
 }
 
 export async function dbGet(sql, params = []) {

@@ -51,6 +51,14 @@ router.post('/seed-shop', async (req, res) => {
     `, [shopId, to, rate]);
   }
 
+  if (req.body.activePlan) {
+    await dbRun(`
+      INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id)
+      VALUES ($1, 'monthly', 'active', 'gid://shopify/AppSubscription/test')
+      ON CONFLICT(shop_id) DO UPDATE SET status = 'active'
+    `, [shopId]);
+  }
+
   res.json({ shopId, shop, currency });
 });
 

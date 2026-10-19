@@ -8,8 +8,9 @@
   const SHOP = Shopify.shop;
   const STORAGE_KEY = 'mc_currency_country';
   const CONFIG_KEY = 'mc_currency_config';
-  const CONFIG_TTL = 5 * 60 * 1000;
+  const CONFIG_TTL = 30 * 1000;
   const FLAG_CDN = 'https://flagcdn.com';
+  const DEFAULT_COLORS = { bg: '#ffffff', text: '#1a1a1a', accent: '#3b82f6' };
 
   let config = null;
   let currentCountry = null;
@@ -17,8 +18,18 @@
   let widgetEl = null;
 
   function getFlagUrl(countryCode, size) {
-    if (!countryCode || countryCode.length !== 2) return '';
+    if (!/^[A-Za-z]{2}$/.test(countryCode || '')) return '';
     return `${FLAG_CDN}/${size || 'w40'}/${countryCode.toLowerCase()}.png`;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[ch]);
+  }
+
+  function safeColor(value, fallback) {
+    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value || '') ? value : fallback;
   }
 
   function getCachedConfig() {
@@ -116,6 +127,10 @@
     } else if (countryConfig.price_adjustment_type === 'fixed' && countryConfig.price_adjustment_value) {
       price += countryConfig.price_adjustment_value;
     }
+    const rulePercent = cfg.rules?.[countryConfig.country_code];
+    if (typeof rulePercent === 'number' && rulePercent !== 0) {
+      price *= (1 + rulePercent / 100);
+    }
     price = applyRounding(price, countryConfig.rounding_rule);
     return { price, currency: targetCurrency };
   }
@@ -177,15 +192,30 @@
   function buildWidget(cfg, activeCountry) {
     const s = cfg.settings;
     const isLeft = !s.widgetPosition || s.widgetPosition === 'bottom-left';
+    const showFlags = s.showFlags !== 0 && s.showFlags !== false;
+    const showName = s.showCountryName !== 0 && s.showCountryName !== false;
+    const bg = safeColor(s.widgetBgColor, DEFAULT_COLORS.bg);
+    const text = safeColor(s.widgetTextColor, DEFAULT_COLORS.text);
+    const accent = safeColor(s.widgetAccentColor, DEFAULT_COLORS.accent);
 
     const el = document.createElement('div');
     el.id = 'mc-currency-widget';
     el.setAttribute('role', 'region');
     el.setAttribute('aria-label', 'Currency selector');
+    if (!showFlags) el.classList.add('mc-no-flags');
+    if (!showName) el.classList.add('mc-no-name');
 
     const styleEl = document.createElement('style');
     styleEl.textContent = `
       #mc-currency-widget {
+        --mc-bg: ${bg};
+        --mc-text: ${text};
+        --mc-accent: ${accent};
+        --mc-muted: color-mix(in srgb, var(--mc-text) 60%, var(--mc-bg));
+        --mc-subtle: color-mix(in srgb, var(--mc-text) 45%, var(--mc-bg));
+        --mc-border: color-mix(in srgb, var(--mc-text) 10%, transparent);
+        --mc-soft: color-mix(in srgb, var(--mc-text) 5%, var(--mc-bg));
+        --mc-active: color-mix(in srgb, var(--mc-accent) 12%, var(--mc-bg));
         position: fixed;
         ${isLeft ? 'left: 20px' : 'right: 20px'};
         bottom: 20px;
@@ -202,59 +232,56 @@
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        background: #ffffff;
-        color: #1a1a1a;
-        border: none;
+        background: var(--mc-bg);
+        color: var(--mc-text);
+        border: 1px solid var(--mc-border);
         border-radius: 100px;
         padding: 8px 16px 8px 8px;
         cursor: pointer;
         font-size: 14px;
         font-weight: 500;
+        font-family: inherit;
         box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.1);
         transition: box-shadow 0.2s ease, transform 0.15s ease;
         white-space: nowrap;
         user-select: none;
         outline: none;
       }
+      .mc-no-flags .mc-trigger { padding-left: 16px; }
       .mc-trigger:hover {
         box-shadow: 0 2px 6px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.14);
         transform: translateY(-1px);
       }
-      .mc-trigger:active { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.1); }
-      .mc-trigger:focus-visible { box-shadow: 0 0 0 2px #3b82f6, 0 4px 16px rgba(0,0,0,0.1); }
+      .mc-trigger:active { transform: translateY(0); }
+      .mc-trigger:focus-visible { box-shadow: 0 0 0 2px var(--mc-accent), 0 4px 16px rgba(0,0,0,0.1); }
 
       .mc-trigger-flag {
         width: 32px;
         height: 32px;
         border-radius: 50%;
         object-fit: cover;
-        border: 2px solid #f0f0f0;
+        border: 2px solid var(--mc-border);
         flex-shrink: 0;
-        background: #f5f5f5;
+        background: var(--mc-soft);
       }
-      .mc-trigger-info {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .mc-trigger-name {
-        font-size: 14px;
-        font-weight: 600;
-        color: #1a1a1a;
-        letter-spacing: -0.01em;
-      }
+      .mc-trigger-info { display: flex; align-items: center; gap: 8px; }
+      .mc-trigger-name { font-size: 14px; font-weight: 600; color: var(--mc-text); letter-spacing: -0.01em; }
       .mc-trigger-code {
         font-size: 11px;
         font-weight: 600;
-        color: #6b7280;
-        background: #f3f4f6;
+        color: var(--mc-muted);
+        background: var(--mc-soft);
         padding: 2px 8px;
         border-radius: 6px;
         letter-spacing: 0.02em;
       }
+      .mc-trigger-code[hidden] { display: none; }
+      .mc-no-name .mc-trigger-name { display: none; }
+      .mc-no-name .mc-trigger-code { font-size: 13px; color: var(--mc-text); background: none; padding: 0; }
+      .mc-no-flags .mc-trigger-flag, .mc-no-flags .mc-flag { display: none; }
       .mc-trigger-chevron {
         flex-shrink: 0;
-        color: #9ca3af;
+        color: var(--mc-subtle);
         transition: transform 0.2s ease;
         margin-left: 2px;
       }
@@ -264,8 +291,9 @@
         position: absolute;
         ${isLeft ? 'left: 0' : 'right: 0'};
         bottom: calc(100% + 10px);
-        background: #ffffff;
-        border: 1px solid rgba(0,0,0,0.06);
+        background: var(--mc-bg);
+        color: var(--mc-text);
+        border: 1px solid var(--mc-border);
         border-radius: 16px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.04), 0 12px 40px rgba(0,0,0,0.12);
         overflow: hidden;
@@ -284,14 +312,11 @@
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
 
-      .mc-header {
-        padding: 16px 16px 14px;
-        border-bottom: 1px solid #f3f4f6;
-      }
+      .mc-header { padding: 16px 16px 14px; border-bottom: 1px solid var(--mc-border); }
       .mc-header-title {
         font-size: 15px;
         font-weight: 700;
-        color: #111827;
+        color: var(--mc-text);
         margin-bottom: 12px;
         letter-spacing: -0.01em;
       }
@@ -300,29 +325,29 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        background: #f9fafb;
-        border: 1.5px solid #e5e7eb;
+        background: var(--mc-soft);
+        border: 1.5px solid var(--mc-border);
         border-radius: 10px;
         padding: 9px 12px;
         transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
       }
       .mc-search-wrap:focus-within {
-        border-color: #3b82f6;
-        background: #ffffff;
-        box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+        border-color: var(--mc-accent);
+        background: var(--mc-bg);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 15%, transparent);
       }
-      .mc-search-icon { color: #9ca3af; flex-shrink: 0; }
+      .mc-search-icon { color: var(--mc-subtle); flex-shrink: 0; }
       .mc-search {
         background: none;
         border: none;
         outline: none;
-        color: #111827;
+        color: var(--mc-text);
         font-size: 14px;
         font-family: inherit;
         width: 100%;
         line-height: 1.4;
       }
-      .mc-search::placeholder { color: #9ca3af; }
+      .mc-search::placeholder { color: var(--mc-subtle); }
 
       .mc-list {
         overflow-y: auto;
@@ -330,11 +355,11 @@
         padding: 6px;
         overscroll-behavior: contain;
         scrollbar-width: thin;
-        scrollbar-color: #d1d5db transparent;
+        scrollbar-color: var(--mc-border) transparent;
       }
       .mc-list::-webkit-scrollbar { width: 4px; }
       .mc-list::-webkit-scrollbar-track { background: transparent; }
-      .mc-list::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+      .mc-list::-webkit-scrollbar-thumb { background: var(--mc-border); border-radius: 4px; }
 
       .mc-item {
         display: flex;
@@ -342,7 +367,7 @@
         gap: 12px;
         padding: 10px 12px;
         cursor: pointer;
-        color: #374151;
+        color: var(--mc-text);
         border: none;
         background: none;
         width: 100%;
@@ -354,10 +379,9 @@
         position: relative;
         outline: none;
       }
-      .mc-item:hover { background: #f9fafb; }
-      .mc-item:focus-visible { background: #f3f4f6; box-shadow: inset 0 0 0 2px #3b82f6; }
-      .mc-item.active { background: #eff6ff; }
-      .mc-item.active:hover { background: #dbeafe; }
+      .mc-item:hover { background: var(--mc-soft); }
+      .mc-item:focus-visible { background: var(--mc-soft); box-shadow: inset 0 0 0 2px var(--mc-accent); }
+      .mc-item.active { background: var(--mc-active); }
       .mc-item[hidden] { display: none; }
 
       .mc-flag {
@@ -366,33 +390,28 @@
         border-radius: 50%;
         object-fit: cover;
         flex-shrink: 0;
-        border: 2px solid #f3f4f6;
-        background: #f9fafb;
+        border: 2px solid var(--mc-border);
+        background: var(--mc-soft);
       }
-      .mc-item.active .mc-flag { border-color: #bfdbfe; }
+      .mc-item.active .mc-flag { border-color: color-mix(in srgb, var(--mc-accent) 35%, var(--mc-bg)); }
 
       .mc-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       .mc-item-name {
         font-weight: 500;
         font-size: 14px;
-        color: #111827;
+        color: var(--mc-text);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         line-height: 1.3;
       }
-      .mc-item-sub {
-        font-size: 12px;
-        color: #6b7280;
-        margin-top: 2px;
-        line-height: 1.3;
-      }
+      .mc-item-sub { font-size: 12px; color: var(--mc-muted); margin-top: 2px; line-height: 1.3; }
       .mc-check {
         flex-shrink: 0;
         width: 20px;
         height: 20px;
         border-radius: 50%;
-        background: #3b82f6;
+        background: var(--mc-accent);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -406,7 +425,7 @@
         padding: 32px 16px;
         text-align: center;
         font-size: 13px;
-        color: #9ca3af;
+        color: var(--mc-subtle);
         display: none;
       }
 
@@ -414,6 +433,7 @@
         #mc-currency-widget { ${isLeft ? 'left: 12px' : 'right: 12px'}; bottom: 12px; }
         .mc-dropdown { width: calc(100vw - 24px); max-height: 380px; }
         .mc-trigger { padding: 6px 14px 6px 6px; }
+        .mc-no-flags .mc-trigger { padding-left: 14px; }
         .mc-trigger-flag { width: 28px; height: 28px; }
         .mc-trigger-name { font-size: 13px; }
         .mc-search { font-size: 16px; }
@@ -450,14 +470,14 @@
         <div class="mc-list" id="mc-list" role="listbox"></div>
         <div class="mc-no-results" id="mc-no-results">No countries found</div>
       </div>
-      <button class="mc-trigger" id="mc-trigger" aria-haspopup="listbox" aria-expanded="false">
+      <button class="mc-trigger" id="mc-trigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Change country and currency">
         ${flagSrc
-          ? `<img class="mc-trigger-flag" id="mc-trigger-flag" src="${flagSrc}" alt="${name}" />`
+          ? `<img class="mc-trigger-flag" id="mc-trigger-flag" src="${flagSrc}" alt="" />`
           : `<span class="mc-trigger-flag" id="mc-trigger-flag" style="display:flex;align-items:center;justify-content:center;font-size:16px;">🌐</span>`
         }
         <span class="mc-trigger-info">
-          <span class="mc-trigger-name" id="mc-trigger-name">${name}</span>
-          ${code ? `<span class="mc-trigger-code" id="mc-trigger-code">${code}</span>` : ''}
+          <span class="mc-trigger-name" id="mc-trigger-name">${escapeHtml(name)}</span>
+          <span class="mc-trigger-code" id="mc-trigger-code"${code ? '' : ' hidden'}>${escapeHtml(code)}</span>
         </span>
         <svg class="mc-trigger-chevron" width="12" height="12" fill="none" viewBox="0 0 24 24">
           <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -541,14 +561,14 @@
       btn.dataset.search = `${country.country_name} ${country.country_code} ${country.currency_code}`.toLowerCase();
 
       btn.innerHTML = `
-        <img class="mc-flag" src="${flagUrl}" alt="${country.country_name}" loading="lazy" />
+        <img class="mc-flag" src="${flagUrl}" alt="" loading="lazy" />
         <span class="mc-item-info">
-          <span class="mc-item-name">${country.country_name}</span>
-          <span class="mc-item-sub">${country.currency_code}${symbol ? ' · ' + symbol : ''}</span>
+          <span class="mc-item-name">${escapeHtml(country.country_name)}</span>
+          <span class="mc-item-sub">${escapeHtml(country.currency_code)}${symbol ? ' · ' + escapeHtml(symbol) : ''}</span>
         </span>
         <span class="mc-check">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
-            <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 13l4 4L19 7" style="stroke: var(--mc-bg)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </span>
       `;
@@ -581,18 +601,20 @@
     if (flagEl && country) {
       if (flagEl.tagName === 'IMG') {
         flagEl.src = getFlagUrl(country.country_code, 'w80');
-        flagEl.alt = country.country_name;
       } else {
         const img = document.createElement('img');
         img.className = 'mc-trigger-flag';
         img.id = 'mc-trigger-flag';
         img.src = getFlagUrl(country.country_code, 'w80');
-        img.alt = country.country_name;
+        img.alt = '';
         flagEl.replaceWith(img);
       }
     }
     if (nameEl) nameEl.textContent = country ? country.country_name : 'Select';
-    if (codeEl) codeEl.textContent = country ? country.currency_code : '';
+    if (codeEl) {
+      codeEl.textContent = country ? country.currency_code : '';
+      codeEl.hidden = !country;
+    }
   }
 
   function selectCountry(country, cfg) {

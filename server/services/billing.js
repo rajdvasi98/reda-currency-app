@@ -1,8 +1,9 @@
 /**
  * Shopify Billing API integration.
  * Plans: monthly ($5/mo) and annual ($50/yr).
- * Uses Shopify's recurring application charges (REST) or app subscriptions (GraphQL).
+ * Uses Shopify app subscriptions (GraphQL Billing API).
  */
+import { dbGet, dbRun } from '../database/init.js';
 
 export const PLANS = {
   monthly: {
@@ -47,11 +48,14 @@ export async function createSubscription(shop, accessToken, planId, returnUrl) {
     }
   `;
 
+  // Development stores (including Shopify's review stores) can only accept test charges.
+  const shopInfo = await shopifyGraphQL(shop, accessToken, '{ shop { plan { partnerDevelopment } } }', {});
+
   const variables = {
     name: plan.name,
     returnUrl,
     trialDays: plan.trialDays,
-    test: process.env.NODE_ENV !== 'production',
+    test: shopInfo?.shop?.plan?.partnerDevelopment === true,
     lineItems: [
       {
         plan: {
@@ -110,6 +114,28 @@ export async function getActiveSubscription(shop, accessToken) {
 }
 
 /**
+ * Mirror the shop's live Shopify subscription into the local table, which gates the
+ * admin features and the storefront widget. Returns the local row, or null if none.
+ */
+export async function syncSubscription(shopId, shop, accessToken) {
+  const live = await getActiveSubscription(shop, accessToken);
+  if (!live || live.status !== 'ACTIVE') {
+    await dbRun('DELETE FROM subscriptions WHERE shop_id = $1', [shopId]);
+    return null;
+  }
+  await dbRun(`
+    INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id, current_period_end)
+    VALUES ($1, $2, 'active', $3, $4)
+    ON CONFLICT(shop_id) DO UPDATE SET
+      plan = excluded.plan, status = 'active',
+      shopify_charge_id = excluded.shopify_charge_id,
+      current_period_end = excluded.current_period_end,
+      updated_at = NOW()
+  `, [shopId, live.name.includes('Annual') ? 'annual' : 'monthly', live.id, live.currentPeriodEnd]);
+  return dbGet('SELECT * FROM subscriptions WHERE shop_id = $1', [shopId]);
+}
+
+/**
  * Cancel an active subscription.
  */
 export async function cancelSubscription(shop, accessToken, subscriptionId) {
@@ -126,7 +152,7 @@ export async function cancelSubscription(shop, accessToken, subscriptionId) {
   return res?.appSubscriptionCancel;
 }
 
-async function shopifyGraphQL(shop, accessToken, query, variables) {
+export async function shopifyGraphQL(shop, accessToken, query, variables) {
   const res = await fetch(`https://${shop}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: {

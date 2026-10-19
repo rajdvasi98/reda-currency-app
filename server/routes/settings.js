@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { dbGet, dbRun } from '../database/init.js';
-import { requireShopAuth } from '../middleware/shopAuth.js';
+import { requireShopAuth, requireActivePlan } from '../middleware/shopAuth.js';
 
 const router = Router();
-router.use(requireShopAuth);
+router.use(requireShopAuth, requireActivePlan);
 
 // GET /api/settings
 router.get('/', async (req, res) => {

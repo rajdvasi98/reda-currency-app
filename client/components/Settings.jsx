@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api.js';
+import { Flag } from './common.jsx';
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
@@ -13,7 +14,10 @@ export default function Settings() {
   }
 
   useEffect(() => {
-    api.getSettings().then(s => { setSettings(s); setLoading(false); });
+    api.getSettings()
+      .then(s => setSettings(s))
+      .catch(err => showAlert(err.message, 'error'))
+      .finally(() => setLoading(false));
   }, []);
 
   async function handleSave() {
@@ -121,11 +125,11 @@ export default function Settings() {
           <div className="form-group">
             <label className="form-label">Background Color</label>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <input type="color" value={settings.widget_bg_color || '#1a1a2e'}
+              <input type="color" value={settings.widget_bg_color || '#ffffff'}
                 onChange={e => set('widget_bg_color', e.target.value)}
                 style={{ width: 40, height: 36, border: 'none', borderRadius: 6, background: 'none', cursor: 'pointer' }} />
               <input type="text" className="form-input" style={{ flex: 1 }}
-                value={settings.widget_bg_color || '#1a1a2e'}
+                value={settings.widget_bg_color || '#ffffff'}
                 onChange={e => set('widget_bg_color', e.target.value)} />
             </div>
           </div>
@@ -133,11 +137,11 @@ export default function Settings() {
           <div className="form-group">
             <label className="form-label">Text Color</label>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <input type="color" value={settings.widget_text_color || '#ffffff'}
+              <input type="color" value={settings.widget_text_color || '#1a1a1a'}
                 onChange={e => set('widget_text_color', e.target.value)}
                 style={{ width: 40, height: 36, border: 'none', borderRadius: 6, background: 'none', cursor: 'pointer' }} />
               <input type="text" className="form-input" style={{ flex: 1 }}
-                value={settings.widget_text_color || '#ffffff'}
+                value={settings.widget_text_color || '#1a1a1a'}
                 onChange={e => set('widget_text_color', e.target.value)} />
             </div>
           </div>
@@ -145,11 +149,11 @@ export default function Settings() {
           <div className="form-group">
             <label className="form-label">Accent Color</label>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <input type="color" value={settings.widget_accent_color || '#e94560'}
+              <input type="color" value={settings.widget_accent_color || '#3b82f6'}
                 onChange={e => set('widget_accent_color', e.target.value)}
                 style={{ width: 40, height: 36, border: 'none', borderRadius: 6, background: 'none', cursor: 'pointer' }} />
               <input type="text" className="form-input" style={{ flex: 1 }}
-                value={settings.widget_accent_color || '#e94560'}
+                value={settings.widget_accent_color || '#3b82f6'}
                 onChange={e => set('widget_accent_color', e.target.value)} />
             </div>
           </div>
@@ -158,21 +162,31 @@ export default function Settings() {
           <div style={{ marginTop: 8 }}>
             <div className="form-label" style={{ marginBottom: 8 }}>Preview</div>
             <div style={{
-              background: settings.widget_bg_color || '#1a1a2e',
-              color: settings.widget_text_color || '#ffffff',
-              borderRadius: 24,
-              padding: '8px 14px',
+              background: settings.widget_bg_color || '#ffffff',
+              color: settings.widget_text_color || '#1a1a1a',
+              border: '1px solid rgba(0,0,0,0.08)',
+              borderRadius: 100,
+              padding: settings.show_flags ? '6px 14px 6px 6px' : '8px 14px',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 8,
               fontSize: 13,
-              fontWeight: 500,
-              boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+              fontWeight: 600,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.1)',
             }}>
-              🇺🇸 United States
-              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" style={{ opacity: 0.6 }}>
-                <path d="M6 9l6 6 6-6" stroke={settings.widget_text_color || '#ffffff'} strokeWidth="2" strokeLinecap="round"/>
+              {!!settings.show_flags && <Flag code="US" size={26} />}
+              {!!settings.show_country_name && <span>United States</span>}
+              <span style={{
+                fontSize: settings.show_country_name ? 11 : 13,
+                opacity: settings.show_country_name ? 0.65 : 1,
+              }}>USD</span>
+              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" style={{ opacity: 0.5 }}>
+                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
               </svg>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: 'var(--text2)' }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', background: settings.widget_accent_color || '#3b82f6' }} />
+              Accent: selected country, search focus, and checkmark
             </div>
           </div>
         </div>
@@ -210,9 +224,9 @@ export default function Settings() {
           <ul style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7, paddingLeft: 16, margin: 0 }}>
             <li>Prices shown in the storefront are <strong>for display only</strong>. Actual checkout uses Shopify's base currency.</li>
             <li>For multi-currency checkout, enable <strong>Shopify Markets</strong> in your Shopify admin.</li>
-            <li>The widget is injected via Script Tag API and works without theme modifications.</li>
-            <li>Exchange rates are fetched from a free public API and update daily.</li>
-            <li>Customer's country preference is saved in their browser (localStorage).</li>
+            <li>The selector is added through a theme app embed. Turn it on from the Dashboard; no theme code is changed.</li>
+            <li>Exchange rates come from a public exchange-rate API. With auto-update on, they refresh on the interval above; rates you edit by hand are kept.</li>
+            <li>A visitor's country choice is saved in their own browser. Changes here can take up to a minute to show on your store.</li>
           </ul>
         </div>
       </div>

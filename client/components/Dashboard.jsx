@@ -1,5 +1,65 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api.js';
+import { Flag } from './common.jsx';
+
+const EXTENSION_HANDLE = 'currency-widget';
+const EMBED_HANDLE = 'app-embed';
+
+async function getEmbedStatus() {
+  if (!window.shopify?.app?.extensions) return 'unknown';
+  try {
+    const extensions = await window.shopify.app.extensions();
+    const ext = extensions.find(e => e.type === 'theme_app_extension' && e.handle === EXTENSION_HANDLE);
+    const embed = ext?.activations?.find(a => a.handle === EMBED_HANDLE);
+    return embed?.status === 'active' ? 'active' : 'inactive';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function WidgetSetupCard({ shopDomain }) {
+  const [status, setStatus] = useState('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => getEmbedStatus().then(s => { if (!cancelled) setStatus(s); });
+    check();
+    window.addEventListener('focus', check);
+    return () => { cancelled = true; window.removeEventListener('focus', check); };
+  }, []);
+
+  const apiKey = document.querySelector('script[data-api-key]')?.dataset.apiKey;
+  const editorUrl = `https://${shopDomain}/admin/themes/current/editor?context=apps&activateAppId=${apiKey}/${EMBED_HANDLE}`;
+  const active = status === 'active';
+
+  return (
+    <div className="card" style={{ marginBottom: 20, border: active ? '1px solid var(--border)' : '2px solid var(--accent)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>Storefront currency selector</div>
+        {status !== 'loading' && status !== 'unknown' && (
+          <span className={`badge ${active ? 'badge-green' : 'badge-red'}`}>
+            {active ? '✓ Enabled on your live theme' : 'Not enabled yet'}
+          </span>
+        )}
+      </div>
+      {!active && (
+        <ol style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.8, margin: '12px 0', paddingLeft: 20 }}>
+          <li>Click <strong>Enable in theme editor</strong>. The theme editor opens in a new tab with the app embed selected.</li>
+          <li>Make sure <strong>Multi Currency Converter</strong> is switched on under <strong>App embeds</strong>.</li>
+          <li>Click <strong>Save</strong>, then come back to this tab. The status above updates automatically.</li>
+        </ol>
+      )}
+      {active && (
+        <p style={{ fontSize: 13, color: 'var(--text2)', margin: '12px 0' }}>
+          Visitors now see the currency selector in the bottom corner of your store. To turn it off, switch off the app embed in the theme editor.
+        </p>
+      )}
+      <button className={`btn ${active ? 'btn-secondary' : 'btn-primary'}`} onClick={() => window.open(editorUrl, '_blank')}>
+        {active ? 'Open theme editor' : 'Enable in theme editor'}
+      </button>
+    </div>
+  );
+}
 
 export default function Dashboard({ shopData, onNavigate }) {
   const [countries, setCountries] = useState([]);
@@ -10,6 +70,7 @@ export default function Dashboard({ shopData, onNavigate }) {
   useEffect(() => {
     Promise.all([api.getCountries(), api.getRates(), api.getRules()])
       .then(([c, r, ru]) => { setCountries(c); setRates(r); setRules(ru); })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -28,6 +89,8 @@ export default function Dashboard({ shopData, onNavigate }) {
           <p className="page-subtitle">Overview of your Multi Currency Converter configuration</p>
         </div>
       </div>
+
+      <WidgetSetupCard shopDomain={shopData?.shop_domain} />
 
       <div className="stats-grid">
         <div className="stat-tile">
@@ -62,7 +125,7 @@ export default function Dashboard({ shopData, onNavigate }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {enabledCountries.slice(0, 6).map(c => (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 20 }}>{c.flag_emoji || '🌐'}</span>
+                  <Flag code={c.country_code} size={22} />
                   <span style={{ flex: 1 }}>{c.country_name}</span>
                   <span className="badge badge-blue">{c.currency_code}</span>
                 </div>
@@ -105,7 +168,7 @@ export default function Dashboard({ shopData, onNavigate }) {
           {[
             { icon: '📍', title: 'Auto-Detection', desc: 'Visitor location is detected by IP and matched to a configured country.' },
             { icon: '💱', title: 'Price Conversion', desc: 'Prices are converted using exchange rates + any adjustments you configure.' },
-            { icon: '🔧', title: 'Manual Selector', desc: 'Fixed bottom-left widget lets visitors choose their own country/currency.' },
+            { icon: '🔧', title: 'Manual Selector', desc: 'A floating selector in the bottom corner lets visitors choose their own country and currency.' },
             { icon: '🛒', title: 'Cart & Checkout', desc: 'Converted prices are shown throughout the store. Checkout uses Shopify pricing.' },
           ].map(step => (
             <div key={step.title} style={{ padding: 14, background: 'var(--bg3)', borderRadius: 8 }}>

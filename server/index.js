@@ -7,6 +7,8 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initDb } from './database/init.js';
+import { validateShopDomain } from './middleware/hmac.js';
+import { startRateScheduler } from './services/exchangeRate.js';
 import authRoutes from './routes/auth.js';
 import { resolveShop } from './middleware/sessionToken.js';
 import countriesRoutes from './routes/countries.js';
@@ -141,10 +143,11 @@ app.get('/privacy', (req, res) => {
 
   <h2>3. Data Sharing</h2>
   <p>We do not sell, rent, or share your data with any third parties.</p>
-  <p>The app uses two external public APIs:</p>
+  <p>The app uses these external services:</p>
   <ul>
-    <li><a href="https://open.er-api.com" target="_blank">open.er-api.com</a> — exchange rate data (no personal data sent)</li>
-    <li><a href="https://ip-api.com" target="_blank">ip-api.com</a> — IP-based country detection (visitor IP, no storage)</li>
+    <li><a href="https://open.er-api.com" target="_blank">open.er-api.com</a> and <a href="https://exchangerate.host" target="_blank">exchangerate.host</a> (backup) — exchange rate data (no personal data sent)</li>
+    <li><a href="https://ip-api.com" target="_blank">ip-api.com</a> and <a href="https://ipapi.co" target="_blank">ipapi.co</a> (backup) — country detection from the store visitor's IP address, only when auto-detect is turned on. We keep the detected country in memory for up to 24 hours and do not store IP addresses in our database.</li>
+    <li><a href="https://flagcdn.com" target="_blank">flagcdn.com</a> — country flag images shown in the storefront currency selector, loaded by the visitor's browser</li>
   </ul>
 
   <h2>4. Data Retention</h2>
@@ -184,7 +187,9 @@ app.get('/app*', adminFallback);
 // Root install redirect
 app.get('/', (req, res) => {
   const shop = req.query.shop;
-  if (shop) return res.redirect(`/api/auth/install?shop=${encodeURIComponent(shop)}`);
+  if (shop && validateShopDomain(shop)) {
+    return res.redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`);
+  }
   res.send(`
     <html>
       <head><title>Multi Currency Converter</title></head>
@@ -212,6 +217,7 @@ async function start() {
     console.log(`   Public: ${HOST}`);
     console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
   });
+  startRateScheduler();
 }
 
 start().catch(err => {

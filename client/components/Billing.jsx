@@ -6,23 +6,23 @@ const PLAN_FEATURES = {
   annual: ['Everything in Monthly', '2 months free (save $10)', 'Priority support', '7-day free trial'],
 };
 
-export default function Billing({ subscription }) {
+export default function Billing({ subscription, declined }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [subscribing, setSubscribing] = useState(null);
   const [alert, setAlert] = useState(null);
 
   useEffect(() => {
-    api.getPlans().then(setPlans).catch(() => {}).finally(() => setLoading(false));
+    api.getPlans().then(setPlans).catch(err => setAlert({ msg: err.message, type: 'error' })).finally(() => setLoading(false));
   }, []);
 
   async function handleSubscribe(planId) {
     setSubscribing(planId);
     try {
       const result = await api.subscribe(planId);
-      if (result.confirmationUrl) {
-        window.top.location.href = result.confirmationUrl;
-      }
+      if (!result.confirmationUrl) throw new Error('Shopify did not return an approval page. Please try again.');
+      // App Bridge turns a _top navigation into an admin redirect to Shopify's approval page.
+      window.open(result.confirmationUrl, '_top');
     } catch (err) {
       setAlert({ msg: err.message, type: 'error' });
       setSubscribing(null);
@@ -30,7 +30,6 @@ export default function Billing({ subscription }) {
   }
 
   const isActive = subscription?.status === 'active';
-  const isPending = subscription?.status === 'pending';
 
   if (loading) return <div style={{ color: 'var(--text2)', padding: 20 }}>Loading…</div>;
 
@@ -38,8 +37,12 @@ export default function Billing({ subscription }) {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Subscription</h1>
-          <p className="page-subtitle">Choose a plan to activate Multi Currency Converter on your store</p>
+          <h1 className="page-title">{isActive ? 'Subscription' : 'Choose a plan'}</h1>
+          <p className="page-subtitle">
+            {isActive
+              ? 'Manage your Multi Currency Converter plan'
+              : 'Start your 7-day free trial to use Multi Currency Converter. You will approve the plan in Shopify.'}
+          </p>
         </div>
       </div>
 
@@ -52,9 +55,9 @@ export default function Billing({ subscription }) {
         </div>
       )}
 
-      {isPending && (
+      {declined && !isActive && (
         <div className="alert alert-info" style={{ marginBottom: 20 }}>
-          ⏳ Subscription pending approval from Shopify.
+          The plan was not approved. Choose a plan below to start your free trial.
         </div>
       )}
 
@@ -80,7 +83,7 @@ export default function Billing({ subscription }) {
             onClick={() => handleSubscribe('monthly')}
             disabled={subscribing || (isActive && subscription.plan === 'monthly')}
           >
-            {subscribing === 'monthly' ? 'Redirecting…' : isActive && subscription.plan === 'monthly' ? 'Current Plan' : 'Start Free Trial'}
+            {subscribing === 'monthly' ? 'Redirecting…' : isActive && subscription.plan === 'monthly' ? 'Current Plan' : isActive ? 'Switch to Monthly' : 'Start Free Trial'}
           </button>
         </div>
 
@@ -113,16 +116,15 @@ export default function Billing({ subscription }) {
             onClick={() => handleSubscribe('annual')}
             disabled={subscribing || (isActive && subscription.plan === 'annual')}
           >
-            {subscribing === 'annual' ? 'Redirecting…' : isActive && subscription.plan === 'annual' ? 'Current Plan' : 'Start Free Trial'}
+            {subscribing === 'annual' ? 'Redirecting…' : isActive && subscription.plan === 'annual' ? 'Current Plan' : isActive ? 'Switch to Annual' : 'Start Free Trial'}
           </button>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 24, background: 'var(--bg3)', maxWidth: 700 }}>
         <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
-          <strong style={{ color: 'var(--text)' }}>About billing:</strong> Your 7-day free trial starts immediately. No charge until the trial ends.
-          Subscription is managed by Shopify — you can cancel anytime from your Shopify Admin → Apps → Multi Currency Converter.
-          All payments are processed securely by Shopify Payments.
+          <strong style={{ color: 'var(--text)' }}>About billing:</strong> Your 7-day free trial starts when you approve the plan, and you are not charged until it ends.
+          Charges appear on your Shopify invoice. You can switch plans here at any time, and uninstalling the app cancels the subscription.
         </div>
       </div>
     </div>

@@ -14,6 +14,15 @@ import { convertPrice } from '../services/priceConverter.js';
 
 const router = Router();
 
+// The storefront widget only runs for installed shops with an active plan.
+function getEntitledShop(shop) {
+  return dbGet(`
+    SELECT s.* FROM shops s
+    JOIN subscriptions sub ON sub.shop_id = s.id AND sub.status = 'active'
+    WHERE s.shop_domain = $1 AND s.is_active = 1
+  `, [shop]);
+}
+
 /**
  * GET /api/proxy/config?shop=
  * Returns all config the widget needs: countries, currencies, rates, settings.
@@ -23,7 +32,7 @@ router.get('/config', async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
 
-  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
+  const shopRow = await getEntitledShop(shop);
   if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
 
   const countries = await dbAll(
@@ -42,7 +51,16 @@ router.get('/config', async (req, res) => {
 
   const settings = await dbGet('SELECT * FROM settings WHERE shop_id = $1', [shopRow.id]) || {};
 
-  res.set('Cache-Control', 'public, max-age=300'); // 5 min cache
+  // Highest-priority enabled "all products" percentage rule per country (same order as convertPrice).
+  const ruleRows = await dbAll(`
+    SELECT country_code, percentage_adjustment FROM pricing_rules
+    WHERE shop_id = $1 AND is_enabled = 1 AND rule_type = 'all' AND percentage_adjustment IS NOT NULL
+    ORDER BY priority DESC, id ASC
+  `, [shopRow.id]);
+  const rules = {};
+  for (const r of ruleRows) if (!(r.country_code in rules)) rules[r.country_code] = r.percentage_adjustment;
+
+  res.set('Cache-Control', 'public, max-age=30');
   res.set('Access-Control-Allow-Origin', '*');
   res.json({
     shop: shop,
@@ -50,12 +68,13 @@ router.get('/config', async (req, res) => {
     countries,
     currencies: currencyMap,
     rates: rateMap,
+    rules,
     settings: {
       autoDetect: settings.auto_detect_enabled ?? 1,
       widgetPosition: settings.widget_position || 'bottom-left',
-      widgetBgColor: settings.widget_bg_color || '#1a1a2e',
-      widgetTextColor: settings.widget_text_color || '#ffffff',
-      widgetAccentColor: settings.widget_accent_color || '#e94560',
+      widgetBgColor: settings.widget_bg_color || '#ffffff',
+      widgetTextColor: settings.widget_text_color || '#1a1a1a',
+      widgetAccentColor: settings.widget_accent_color || '#3b82f6',
       fallbackCountry: settings.fallback_country || 'US',
       showFlags: settings.show_flags ?? 1,
       showCountryName: settings.show_country_name ?? 1,
@@ -76,7 +95,7 @@ router.get('/detect', async (req, res) => {
 
   // Find matching country in shop config
   if (geoResult.countryCode) {
-    const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
+    const shopRow = await getEntitledShop(shop);
     if (shopRow) {
       const country = await dbGet(
         'SELECT * FROM countries WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1',
@@ -102,7 +121,7 @@ router.get('/prices', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1 AND is_active = 1', [shop]);
+  const shopRow = await getEntitledShop(shop);
   if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
 
   const basePrices = pricesParam.split(',').map(Number).filter(n => !isNaN(n));

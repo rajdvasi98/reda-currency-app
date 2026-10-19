@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { dbGet, dbAll, dbRun } from '../database/init.js';
-import { requireShopAuth } from '../middleware/shopAuth.js';
+import { requireShopAuth, requireActivePlan } from '../middleware/shopAuth.js';
 
 const router = Router();
-router.use(requireShopAuth);
+router.use(requireShopAuth, requireActivePlan);
 
 // GET /api/countries — list all countries for the shop
 router.get('/', async (req, res) => {
