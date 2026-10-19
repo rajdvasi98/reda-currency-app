@@ -22,13 +22,14 @@ export function ConfirmDeleteButton({ onConfirm, label = '✕', ariaLabel = 'Del
 
   useEffect(() => {
     if (!armed) return undefined;
-    const t = setTimeout(() => setArmed(false), 4000);
+    const t = setTimeout(() => setArmed(false), 6000);
     return () => clearTimeout(t);
   }, [armed]);
 
   return (
     <button
       className="btn btn-danger btn-sm"
+      style={{ minWidth: 72, justifyContent: 'center' }}
       aria-label={armed ? 'Confirm delete' : ariaLabel}
       onClick={() => (armed ? (setArmed(false), onConfirm()) : setArmed(true))}
     >
