@@ -157,24 +157,29 @@
     '[class*="Price__"]', '.gift-card__price',
   ].join(',');
 
+  // Original storefront text per price element, used to restore the base currency.
+  const originalText = new WeakMap();
+
   function rewritePrices(countryConfig, cfg) {
+    const useBase = !countryConfig || countryConfig.currency_code === cfg.baseCurrency;
     document.querySelectorAll(PRICE_SELECTORS).forEach(el => {
-      if (!el.dataset.mcOriginal) {
+      // Only rewrite innermost price elements so theme structure (sale/compare-at, hidden labels) survives.
+      if (el.querySelector(PRICE_SELECTORS) || el.closest('#mc-currency-widget')) return;
+      if (!originalText.has(el)) {
         const original = parseShopifyPrice(el);
         if (original === null || original === 0) return;
         el.dataset.mcOriginal = Math.round(original * 100);
+        originalText.set(el, el.textContent);
       }
-      const originalPrice = parseInt(el.dataset.mcOriginal) / 100;
-      if (!countryConfig || countryConfig.currency_code === cfg.baseCurrency) {
-        if (el.dataset.mcFormatted) {
-          el.textContent = el.dataset.mcFormatted;
-          delete el.dataset.mcFormatted;
-        }
-        return;
+      let next;
+      if (useBase) {
+        next = originalText.get(el);
+      } else {
+        const { price, currency } = convertAmount(parseInt(el.dataset.mcOriginal, 10) / 100, cfg.baseCurrency, countryConfig, cfg);
+        next = formatPrice(price, currency, cfg);
       }
-      if (!el.dataset.mcFormatted) el.dataset.mcFormatted = el.textContent.trim();
-      const { price, currency } = convertAmount(originalPrice, cfg.baseCurrency, countryConfig, cfg);
-      el.textContent = formatPrice(price, currency, cfg);
+      // Writing text triggers the MutationObserver, so only write real changes.
+      if (el.textContent !== next) el.textContent = next;
     });
   }
 
@@ -635,9 +640,6 @@
     if (dropdown) dropdown.classList.remove('open');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
 
-    document.querySelectorAll('[data-mc-original]').forEach(el => {
-      delete el.dataset.mcFormatted;
-    });
     rewritePrices(country, cfg);
     startObserver(country, cfg);
   }
