@@ -37,7 +37,8 @@ export default function Settings() {
     setSettings(s => ({ ...s, [key]: val }));
   }
 
-  if (loading || !settings) return <div style={{ color: 'var(--text2)', padding: 20 }}>Loading…</div>;
+  if (loading) return <div style={{ color: 'var(--text2)', padding: 20 }}>Loading…</div>;
+  if (!settings) return <div className="alert alert-error">{alert?.msg || 'Could not load settings.'} Please reload the page.</div>;
 
   return (
     <div>

@@ -68,11 +68,12 @@ export default function Dashboard({ shopData, onNavigate }) {
   const [rates, setRates] = useState([]);
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     Promise.all([api.getCountries(), api.getRates(), api.getRules()])
       .then(([c, r, ru]) => { setCountries(c); setRates(r); setRules(ru); })
-      .catch(() => {})
+      .catch(err => setLoadError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -93,6 +94,8 @@ export default function Dashboard({ shopData, onNavigate }) {
       </div>
 
       <WidgetSetupCard shopDomain={shopData?.shop_domain} />
+
+      {loadError && <div className="alert alert-error">Could not load your configuration: {loadError}. Please reload the page.</div>}
 
       <div className="stats-grid">
         <div className="stat-tile">

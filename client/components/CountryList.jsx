@@ -137,6 +137,7 @@ export default function CountryList() {
   useEffect(() => {
     Promise.all([api.getCountries(), api.getCurrencies()])
       .then(([c, cur]) => { setCountries(c); setCurrencies(cur); })
+      .catch(err => showAlert(`Could not load countries: ${err.message}`, 'error'))
       .finally(() => setLoading(false));
   }, []);
 

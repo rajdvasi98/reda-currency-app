@@ -77,7 +77,8 @@ app.use('/api/webhooks', webhookRoutes);
 
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  // Storefront visitors behind one carrier/office IP share this budget, so keep it generous.
+  max: 600,
   standardHeaders: true,
   legacyHeaders: false,
 });

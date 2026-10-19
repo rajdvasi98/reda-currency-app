@@ -23,9 +23,11 @@ function verifySessionToken(token) {
 
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
 
+    // Small leeway for clock differences between Shopify and this server.
+    const LEEWAY_SECONDS = 5;
     const now = Date.now() / 1000;
-    if (!claims.exp || now > claims.exp) return null;
-    if (claims.nbf && now < claims.nbf) return null;
+    if (!claims.exp || now > claims.exp + LEEWAY_SECONDS) return null;
+    if (claims.nbf && now < claims.nbf - LEEWAY_SECONDS) return null;
     if (claims.aud !== process.env.SHOPIFY_API_KEY) return null;
     if (!claims.iss || !claims.dest) return null;
     if (new URL(claims.iss).hostname !== new URL(claims.dest).hostname) return null;

@@ -16,7 +16,10 @@ export default function ExchangeRates({ shopData }) {
   }
 
   useEffect(() => {
-    api.getRates().then(setRates).finally(() => setLoading(false));
+    api.getRates()
+      .then(setRates)
+      .catch(err => showAlert(`Could not load exchange rates: ${err.message}`, 'error'))
+      .finally(() => setLoading(false));
   }, []);
 
   async function handleRefresh() {

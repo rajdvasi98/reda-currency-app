@@ -10,18 +10,23 @@ async function getSessionToken() {
   return null;
 }
 
-async function apiFetch(path, options = {}) {
+async function request(path, options) {
   const token = await getSessionToken();
   const url = path.includes('?') ? `${path}&shop=${shop}` : `${path}?shop=${shop}`;
-  const res = await fetch(url, {
+  return fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Shop-Domain': shop,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
+}
+
+async function apiFetch(path, options = {}) {
+  let res = await request(path, options);
+  // Retry once with a fresh session token if the first one was rejected.
+  if (res.status === 401) res = await request(path, options);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
