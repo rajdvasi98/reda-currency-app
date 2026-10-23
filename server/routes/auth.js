@@ -62,6 +62,7 @@ async function setupShop(shop, tokenData) {
       refresh_token = excluded.refresh_token,
       token_expires_at = excluded.token_expires_at,
       default_currency = excluded.default_currency,
+      installed_at = CASE WHEN shops.is_active = 1 THEN shops.installed_at ELSE NOW() END,
       is_active = 1, updated_at = NOW()
   `, [shop, access_token, refresh_token || null, tokenExpiry(expires_in), defaultCurrency]);
 

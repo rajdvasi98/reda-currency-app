@@ -4,7 +4,7 @@
  * Fallback: exchangerate.host (in case primary is down).
  * Rates are stored per-shop so each merchant can override individual pairs manually.
  */
-import { dbGet, dbAll, dbRun } from '../database/init.js';
+import { dbGet, dbAll, dbRun, parseDbTime } from '../database/init.js';
 
 const EXCHANGE_RATE_API = process.env.EXCHANGE_RATE_API_URL || 'https://open.er-api.com/v6/latest';
 
@@ -39,27 +39,22 @@ export async function fetchAndStoreRates(shopId, baseCurrency, { keepManual = fa
   return { success: true, count: Object.keys(data.rates).length, base: baseCurrency };
 }
 
-function toDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${String(value).replace(' ', 'T')}Z`);
-}
-
 async function refreshDueShops() {
   const shops = await dbAll(`
     SELECT s.id, s.default_currency, st.rate_update_interval
     FROM shops s
     JOIN settings st ON st.shop_id = s.id
-    JOIN subscriptions sub ON sub.shop_id = s.id AND sub.status = 'active'
+    LEFT JOIN subscriptions sub ON sub.shop_id = s.id
     WHERE s.is_active = 1 AND st.auto_update_rates = 1
-  `);
+      AND (sub.status = 'active' OR s.installed_at > $1)
+  `, [new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')]);
   for (const shop of shops) {
     const last = await dbGet(
       "SELECT MAX(fetched_at) AS last FROM exchange_rates WHERE shop_id = $1 AND source = 'auto'",
       [shop.id]
     );
     const intervalMs = Math.max(1, shop.rate_update_interval || 24) * 60 * 60 * 1000;
-    const lastFetch = toDate(last?.last);
+    const lastFetch = parseDbTime(last?.last);
     if (lastFetch && Date.now() - lastFetch.getTime() < intervalMs) continue;
     const result = await fetchAndStoreRates(shop.id, shop.default_currency, { keepManual: true });
     if (!result.success) console.warn(`[Rates] Scheduled refresh failed for shop ${shop.id}:`, result.error);

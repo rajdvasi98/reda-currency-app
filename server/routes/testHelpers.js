@@ -51,6 +51,11 @@ router.post('/seed-shop', async (req, res) => {
     `, [shopId, to, rate]);
   }
 
+  if (req.body.installedDaysAgo) {
+    const at = new Date(Date.now() - req.body.installedDaysAgo * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+    await dbRun('UPDATE shops SET installed_at = $1 WHERE id = $2', [at, shopId]);
+  }
+
   if (req.body.activePlan) {
     await dbRun(`
       INSERT INTO subscriptions (shop_id, plan, status, shopify_charge_id)

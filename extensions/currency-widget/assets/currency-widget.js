@@ -644,10 +644,33 @@
     startObserver(country, cfg);
   }
 
+  const INACTIVE_MESSAGES = {
+    plan_required: 'Choose a plan in the Multi Currency Converter app to show the currency selector on your store.',
+    not_installed: 'Open Multi Currency Converter from your Shopify admin to finish setting it up.',
+    no_countries: 'Enable at least one country in the Multi Currency Converter app to show the currency selector.',
+  };
+
+  // Shoppers see nothing; the merchant sees why in the theme editor.
+  function showInactive(reason) {
+    const message = INACTIVE_MESSAGES[reason] || INACTIVE_MESSAGES.not_installed;
+    console.info(`[Multi Currency Converter] Currency selector is hidden. ${message}`);
+    if (!window.Shopify || !window.Shopify.designMode) return;
+    const note = document.createElement('div');
+    note.id = 'mc-currency-widget-notice';
+    note.setAttribute('role', 'status');
+    note.textContent = message;
+    note.style.cssText = 'position:fixed;left:20px;bottom:20px;z-index:2147483647;max-width:320px;' +
+      'padding:12px 14px;background:#fff;color:#1a1a1a;border:1px solid #f59e0b;border-left-width:4px;' +
+      'border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);' +
+      'font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;';
+    document.body.appendChild(note);
+  }
+
   async function init() {
     try {
       config = await loadConfig();
-      if (!config.countries || config.countries.length === 0) return;
+      if (config.active === false) return showInactive(config.reason);
+      if (!config.countries || config.countries.length === 0) return showInactive('no_countries');
 
       let activeCountry = resolveCountry(config);
 

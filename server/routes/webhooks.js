@@ -8,8 +8,19 @@
 import { Router } from 'express';
 import { dbGet, dbRun } from '../database/init.js';
 import { verifyWebhookHmac } from '../middleware/hmac.js';
+import { getValidToken } from '../services/tokenRefresh.js';
+import { shopifyGraphQL } from '../services/billing.js';
 
 const router = Router();
+
+async function stillInstalled(shop) {
+  try {
+    await shopifyGraphQL(shop, await getValidToken(shop), '{ shop { id } }', {});
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // All webhook routes verify HMAC before processing
 router.use(verifyWebhookHmac);
@@ -25,6 +36,12 @@ router.post('/app/uninstalled', async (req, res) => {
   const shopRow = await dbGet('SELECT * FROM shops WHERE shop_domain = $1', [shop]);
 
   if (shopRow) {
+    // Delivery order isn't guaranteed: if the app was reinstalled before this arrived, the stored
+    // token still works, and deactivating would break the new install. Uninstalling revokes tokens.
+    if (await stillInstalled(shop)) {
+      console.log(`[Webhook] app/uninstalled for ${shop} ignored: app is installed again`);
+      return res.status(200).json({ ok: true });
+    }
     await dbRun(
       'UPDATE shops SET is_active = 0, updated_at = NOW() WHERE shop_domain = $1',
       [shop]

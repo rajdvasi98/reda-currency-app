@@ -11,6 +11,14 @@ let sqliteDb = null;
 
 export function getPool() { return pool; }
 
+// PostgreSQL returns Date objects; SQLite returns 'YYYY-MM-DD HH:MM:SS' text in UTC.
+export function parseDbTime(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const s = String(value);
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
+}
+
 // Convert PostgreSQL $1/$2 placeholders and NOW() to SQLite equivalents
 function pgToSqlite(sql) {
   return sql

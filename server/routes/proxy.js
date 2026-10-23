@@ -8,19 +8,35 @@
  *   GET /api/proxy/prices   → batch-convert prices for a list of amounts
  */
 import { Router } from 'express';
-import { dbGet, dbAll } from '../database/init.js';
+import { dbGet, dbAll, parseDbTime } from '../database/init.js';
 import { detectCountry, extractClientIp } from '../services/geolocation.js';
 import { convertPrice } from '../services/priceConverter.js';
 
 const router = Router();
 
-// The storefront widget only runs for installed shops with an active plan.
-function getEntitledShop(shop) {
-  return dbGet(`
-    SELECT s.* FROM shops s
-    JOIN subscriptions sub ON sub.shop_id = s.id AND sub.status = 'active'
+// Matches the plan trial, so a new install can be tried on the storefront before approving a plan.
+const INSTALL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The widget runs for installed shops with an active plan, or within 7 days of installing.
+ * An inactive shop is a normal state, not an error, so callers answer 200 with `active: false`.
+ */
+async function getStorefrontShop(shop) {
+  const row = await dbGet(`
+    SELECT s.*, sub.status AS plan_status FROM shops s
+    LEFT JOIN subscriptions sub ON sub.shop_id = s.id
     WHERE s.shop_domain = $1 AND s.is_active = 1
   `, [shop]);
+  if (!row) return { shopRow: null, reason: 'not_installed' };
+  if (row.plan_status === 'active') return { shopRow: row };
+  const installedAt = parseDbTime(row.installed_at);
+  if (installedAt && Date.now() - installedAt.getTime() < INSTALL_GRACE_MS) return { shopRow: row };
+  return { shopRow: null, reason: 'plan_required' };
+}
+
+function setPublicHeaders(res) {
+  res.set('Cache-Control', 'public, max-age=30');
+  res.set('Access-Control-Allow-Origin', '*');
 }
 
 /**
@@ -32,8 +48,9 @@ router.get('/config', async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
 
-  const shopRow = await getEntitledShop(shop);
-  if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
+  const { shopRow, reason } = await getStorefrontShop(shop);
+  setPublicHeaders(res);
+  if (!shopRow) return res.json({ active: false, reason });
 
   const countries = await dbAll(
     'SELECT * FROM countries WHERE shop_id = $1 AND is_enabled = 1 ORDER BY country_name',
@@ -60,9 +77,8 @@ router.get('/config', async (req, res) => {
   const rules = {};
   for (const r of ruleRows) if (!(r.country_code in rules)) rules[r.country_code] = r.percentage_adjustment;
 
-  res.set('Cache-Control', 'public, max-age=30');
-  res.set('Access-Control-Allow-Origin', '*');
   res.json({
+    active: true,
     shop: shop,
     baseCurrency: shopRow.default_currency,
     countries,
@@ -90,25 +106,24 @@ router.get('/detect', async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: 'Missing shop' });
 
+  res.set('Access-Control-Allow-Origin', '*');
+  const { shopRow, reason } = await getStorefrontShop(shop);
+  if (!shopRow) return res.json({ active: false, reason, detected: false });
+
   const ip = extractClientIp(req);
   const geoResult = await detectCountry(ip);
 
-  // Find matching country in shop config
   if (geoResult.countryCode) {
-    const shopRow = await getEntitledShop(shop);
-    if (shopRow) {
-      const country = await dbGet(
-        'SELECT * FROM countries WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1',
-        [shopRow.id, geoResult.countryCode]
-      );
-
-      if (country) {
-        return res.json({ detected: true, country, source: geoResult.source });
-      }
+    const country = await dbGet(
+      'SELECT * FROM countries WHERE shop_id = $1 AND country_code = $2 AND is_enabled = 1',
+      [shopRow.id, geoResult.countryCode]
+    );
+    if (country) {
+      return res.json({ active: true, detected: true, country, source: geoResult.source });
     }
   }
 
-  res.json({ detected: false, countryCode: geoResult.countryCode, source: geoResult.source });
+  res.json({ active: true, detected: false, countryCode: geoResult.countryCode, source: geoResult.source });
 });
 
 /**
@@ -121,8 +136,9 @@ router.get('/prices', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  const shopRow = await getEntitledShop(shop);
-  if (!shopRow) return res.status(404).json({ error: 'Shop not found' });
+  res.set('Access-Control-Allow-Origin', '*');
+  const { shopRow, reason } = await getStorefrontShop(shop);
+  if (!shopRow) return res.json({ active: false, reason, results: [] });
 
   const basePrices = pricesParam.split(',').map(Number).filter(n => !isNaN(n));
 
@@ -137,8 +153,7 @@ router.get('/prices', async (req, res) => {
     };
   }));
 
-  res.set('Access-Control-Allow-Origin', '*');
-  res.json({ results });
+  res.json({ active: true, results });
 });
 
 export default router;
