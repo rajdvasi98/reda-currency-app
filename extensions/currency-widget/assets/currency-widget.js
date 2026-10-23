@@ -157,29 +157,101 @@
     '[class*="Price__"]', '.gift-card__price',
   ].join(',');
 
-  // Original storefront text per price element, used to restore the base currency.
+  // Original storefront text per price element / text node, used to restore the base currency.
   const originalText = new WeakMap();
+  const originalNodeText = new WeakMap();
+  // What we last wrote; any other text means the theme updated the price (e.g. variant change).
+  const writtenText = new WeakMap();
+  const writtenNodeText = new WeakMap();
+  const SKIP_TEXT_IN = 'script,style,noscript,textarea,select,option,[contenteditable],#mc-currency-widget,#mc-currency-widget-notice';
+
+  const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Matches an amount written in the store's base currency format, e.g. "$1,234.50" or "$10.00 USD".
+  // The look-behind keeps "A$12" or "C$12" (other dollar currencies) from matching.
+  function moneyPattern(cfg) {
+    const cur = cfg.currencies[cfg.baseCurrency] || {};
+    const sym = escapeRegExp(cur.symbol || cfg.baseCurrency);
+    const ts = escapeRegExp(cur.thousand_separator ?? ',');
+    const ds = escapeRegExp(cur.decimal_separator ?? '.');
+    const code = escapeRegExp(cfg.baseCurrency);
+    const num = `\\d{1,3}(?:${ts}\\d{3})+(?:${ds}\\d{1,2})?|\\d+(?:${ds}\\d{1,2})?`;
+    return cur.symbol_position === 'after'
+      ? new RegExp(`(${num})\\s?${sym}(?:\\s?${code}\\b)?`, 'g')
+      : new RegExp(`(?<![A-Za-z])${sym}\\s?(${num})(?:\\s?${code}\\b)?`, 'g');
+  }
+
+  function parseMoneyNumber(num, cfg) {
+    const cur = cfg.currencies[cfg.baseCurrency] || {};
+    const ts = cur.thousand_separator ?? ',';
+    const ds = cur.decimal_separator ?? '.';
+    return parseFloat(num.split(ts).join('').replace(ds, '.'));
+  }
+
+  function hasConvertedAncestor(node) {
+    for (let el = node.parentElement; el; el = el.parentElement) {
+      if (originalText.has(el)) return true;
+    }
+    return false;
+  }
 
   function rewritePrices(countryConfig, cfg) {
     const useBase = !countryConfig || countryConfig.currency_code === cfg.baseCurrency;
+    const money = moneyPattern(cfg);
+    const moneyTest = new RegExp(money.source);
+    const convertText = text => text.replace(money, (match, num) => {
+      const { price, currency } = convertAmount(parseMoneyNumber(num, cfg), cfg.baseCurrency, countryConfig, cfg);
+      return formatPrice(price, currency, cfg);
+    });
+
     document.querySelectorAll(PRICE_SELECTORS).forEach(el => {
       // Only rewrite innermost price elements so theme structure (sale/compare-at, hidden labels) survives.
       if (el.querySelector(PRICE_SELECTORS) || el.closest('#mc-currency-widget')) return;
+      if (writtenText.has(el) && el.textContent !== writtenText.get(el)) {
+        originalText.delete(el);
+        delete el.dataset.mcOriginal;
+      }
       if (!originalText.has(el)) {
         const original = parseShopifyPrice(el);
         if (original === null || original === 0) return;
         el.dataset.mcOriginal = Math.round(original * 100);
         originalText.set(el, el.textContent);
       }
-      let next;
-      if (useBase) {
-        next = originalText.get(el);
-      } else {
-        const { price, currency } = convertAmount(parseInt(el.dataset.mcOriginal, 10) / 100, cfg.baseCurrency, countryConfig, cfg);
-        next = formatPrice(price, currency, cfg);
+      const original = originalText.get(el);
+      let next = original;
+      if (!useBase) {
+        if (moneyTest.test(original)) {
+          next = convertText(original);
+        } else {
+          const { price, currency } = convertAmount(parseInt(el.dataset.mcOriginal, 10) / 100, cfg.baseCurrency, countryConfig, cfg);
+          next = formatPrice(price, currency, cfg);
+        }
       }
       // Writing text triggers the MutationObserver, so only write real changes.
       if (el.textContent !== next) el.textContent = next;
+      writtenText.set(el, next);
+    });
+
+    // Prices inside other text, e.g. selling plan labels ("Subscription $21.21") or cart details.
+    const nodes = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.parentElement || node.parentElement.closest(SKIP_TEXT_IN) || hasConvertedAncestor(node)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return originalNodeText.has(node) || moneyTest.test(node.nodeValue)
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (writtenNodeText.has(node) && node.nodeValue !== writtenNodeText.get(node)) originalNodeText.delete(node);
+      if (!originalNodeText.has(node)) originalNodeText.set(node, node.nodeValue);
+      const original = originalNodeText.get(node);
+      const next = useBase ? original : convertText(original);
+      // Text edits are characterData mutations, which the observer ignores, so this cannot loop.
+      if (node.nodeValue !== next) node.nodeValue = next;
+      writtenNodeText.set(node, next);
     });
   }
 
@@ -499,6 +571,7 @@
 
     document.body.appendChild(el);
     widgetEl = el;
+    keepAbovePreviewBar(el);
 
     populateList(cfg, activeCountry);
 
@@ -642,6 +715,30 @@
 
     rewritePrices(country, cfg);
     startObserver(country, cfg);
+  }
+
+  // Shopify's preview bar (shown to logged-in staff) is fixed to the bottom of the storefront and
+  // covers a bottom-corner widget, so sit just above it and follow its height.
+  const PREVIEW_BAR_ID = 'PBarNextFrameWrapper';
+
+  function keepAbovePreviewBar(el) {
+    const apply = () => {
+      const bar = document.getElementById(PREVIEW_BAR_ID);
+      const height = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect().height : 0;
+      el.style.bottom = height > 0 ? `${Math.round(height) + 12}px` : '';
+    };
+    const watch = bar => {
+      apply();
+      if ('ResizeObserver' in window) new ResizeObserver(apply).observe(bar);
+    };
+    const bar = document.getElementById(PREVIEW_BAR_ID);
+    if (bar) return watch(bar);
+    let tries = 0;
+    const timer = setInterval(() => {
+      const found = document.getElementById(PREVIEW_BAR_ID);
+      if (found) watch(found);
+      if (found || ++tries >= 10) clearInterval(timer);
+    }, 1000);
   }
 
   const INACTIVE_MESSAGES = {
