@@ -6,6 +6,7 @@
 
 <script>
   window.MULTICURRENCY_APP_HOST = "https://reda-currency-app.onrender.com";
+  window.MULTICURRENCY_MONEY_FORMATS = [{{ shop.money_with_currency_format | json }}, {{ shop.money_format | json }}];
 </script>
 <script src="{{ 'currency-widget.js' | asset_url }}" defer></script>
 

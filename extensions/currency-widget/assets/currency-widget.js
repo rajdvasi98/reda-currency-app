@@ -98,21 +98,24 @@
       : `${formatted} ${currency.symbol}`;
   }
 
-  function parseShopifyPrice(el) {
-    const raw = el.dataset.mcOriginal || el.dataset.productPrice || el.dataset.cartPrice;
-    if (raw) return parseFloat(raw) / 100;
-    const text = el.textContent.replace(/[^\d.,]/g, '').trim();
-    if (!text) return null;
-    let normalized = text;
-    const lastComma = text.lastIndexOf(',');
-    const lastDot = text.lastIndexOf('.');
-    if (lastComma > lastDot) {
-      normalized = text.replace(/\./g, '').replace(',', '.');
-    } else {
-      normalized = text.replace(/,/g, '');
+  // A bare number with no currency marker, e.g. "8,695.00" or "1.234,56". Returns null for anything else.
+  function parsePlainNumber(text) {
+    const t = String(text).trim();
+    if (!/^\d[\d.,'\s ]*$/.test(t)) return null;
+    let n = t.replace(/[\s ']/g, '');
+    const lc = n.lastIndexOf(',');
+    const ld = n.lastIndexOf('.');
+    if (lc > -1 && ld > -1) {
+      n = lc > ld ? n.replace(/\./g, '').replace(',', '.') : n.replace(/,/g, '');
+    } else if (lc > -1 || ld > -1) {
+      const sep = lc > -1 ? ',' : '.';
+      const parts = n.split(sep);
+      const last = parts[parts.length - 1];
+      // "8,695" or "1,234,567" are thousands; "12,50" is a decimal.
+      n = parts.length > 2 || last.length === 3 ? parts.join('') : `${parts.slice(0, -1).join('')}.${last}`;
     }
-    const val = parseFloat(normalized);
-    return isNaN(val) ? null : val;
+    const v = parseFloat(n);
+    return isNaN(v) ? null : v;
   }
 
   function convertAmount(baseAmount, baseCurrency, countryConfig, cfg) {
@@ -167,25 +170,96 @@
 
   const escapeRegExp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // Matches an amount written in the store's base currency format, e.g. "$1,234.50" or "$10.00 USD".
-  // The look-behind keeps "A$12" or "C$12" (other dollar currencies) from matching.
-  function moneyPattern(cfg) {
-    const cur = cfg.currencies[cfg.baseCurrency] || {};
-    const sym = escapeRegExp(cur.symbol || cfg.baseCurrency);
-    const ts = escapeRegExp(cur.thousand_separator ?? ',');
-    const ds = escapeRegExp(cur.decimal_separator ?? '.');
-    const code = escapeRegExp(cfg.baseCurrency);
-    const num = `\\d{1,3}(?:${ts}\\d{3})+(?:${ds}\\d{1,2})?|\\d+(?:${ds}\\d{1,2})?`;
-    return cur.symbol_position === 'after'
-      ? new RegExp(`(${num})\\s?${sym}(?:\\s?${code}\\b)?`, 'g')
-      : new RegExp(`(?<![A-Za-z])${sym}\\s?(${num})(?:\\s?${code}\\b)?`, 'g');
+  // Separators for each Shopify money format placeholder: [thousands, decimal].
+  const AMOUNT_STYLES = {
+    amount: [',', '.'],
+    amount_no_decimals: [',', null],
+    amount_with_comma_separator: ['.', ','],
+    amount_no_decimals_with_comma_separator: ['.', null],
+    amount_with_apostrophe_separator: ["'", '.'],
+    amount_with_space_separator: [' ', ','],
+    amount_no_decimals_with_space_separator: [' ', null],
+    amount_with_period_and_space_separator: [' ', '.'],
+  };
+
+  // Money formats may contain HTML (e.g. '<span class=money>Rs. {{amount}}</span>'). DOMParser
+  // documents are inert, so this reads the text without running anything.
+  const formatText = s => new DOMParser().parseFromString(String(s), 'text/html').body.textContent;
+
+  function separatorPattern(sep) {
+    return sep === ' ' ? '[ \\u00a0\\u202f]' : escapeRegExp(sep);
   }
 
-  function parseMoneyNumber(num, cfg) {
+  /**
+   * Matcher for amounts written in the store's own currency, built from the shop's real Shopify
+   * money formats (e.g. "Rs. {{amount}} INR"), with our currency table's symbol as a fallback.
+   * Only text in this format is ever treated as a store-currency price.
+   */
+  function buildMoneyMatcher(cfg) {
     const cur = cfg.currencies[cfg.baseCurrency] || {};
-    const ts = cur.thousand_separator ?? ',';
-    const ds = cur.decimal_separator ?? '.';
-    return parseFloat(num.split(ts).join('').replace(ds, '.'));
+    const variants = [];
+    const seen = new Set();
+    const add = (pre, post, style) => {
+      const key = `${pre}|${post}|${style.join()}`;
+      if (!seen.has(key)) { seen.add(key); variants.push({ pre, post, style }); }
+    };
+    (window.MULTICURRENCY_MONEY_FORMATS || []).forEach(f => {
+      if (typeof f !== 'string') return;
+      const text = formatText(f);
+      const m = text.match(/\{\{\s*(\w+)\s*\}\}/);
+      if (!m) return;
+      add(text.slice(0, m.index).trim(), text.slice(m.index + m[0].length).trim(), AMOUNT_STYLES[m[1]] || AMOUNT_STYLES.amount);
+    });
+    const tableStyle = [cur.thousand_separator ?? ',', cur.decimal_places === 0 ? null : (cur.decimal_separator ?? '.')];
+    const sym = cur.symbol || cfg.baseCurrency;
+    if (cur.symbol_position === 'after') add('', sym, tableStyle);
+    else add(sym, '', tableStyle);
+
+    const code = escapeRegExp(cfg.baseCurrency);
+    const sources = variants.map(({ pre, post, style }) => {
+      const ts = separatorPattern(style[0]);
+      const dec = style[1] ? `(?:${separatorPattern(style[1])}\\d{1,2})?` : '';
+      // Groups of 2 or 3 digits allow Indian lakh grouping ("1,00,000"); the look-ahead stops a
+      // match from ending in the middle of a longer number.
+      const num = `(\\d{1,3}(?:${ts}\\d{2,3})*${ts}\\d{3}${dec}|\\d+${dec})(?!\\d|[.,']\\d)`;
+      // The look-behind keeps "A$12" (another dollar) or a longer number from matching.
+      const lead = pre ? `(?<![A-Za-z0-9])${escapeRegExp(pre)}\\s?` : '(?<![\\d.,])';
+      const tail = post ? `\\s?${escapeRegExp(post)}` : '';
+      return `${lead}${num}${tail}(?:\\s?${code}\\b)?`;
+    });
+    const regex = new RegExp(sources.map(s => `(?:${s})`).join('|'), 'g');
+    // match[0] is the whole match; exactly one variant's capture group holds the number.
+    const toNumber = match => {
+      const groups = Array.prototype.slice.call(match, 1, 1 + variants.length);
+      const i = groups.findIndex(g => g !== undefined);
+      const [ts, ds] = variants[i].style;
+      let n = ts === ' ' ? groups[i].replace(/[   ]/g, '') : groups[i].split(ts).join('');
+      if (ds) n = n.replace(ds, '.');
+      return parseFloat(n);
+    };
+    return {
+      test: text => new RegExp(regex.source).test(text),
+      // Calls fn(amount) for each store-currency amount in the text and substitutes the result.
+      replace: (text, fn) => text.replace(regex, (...args) => fn(toNumber(args))),
+      amount: text => {
+        const m = new RegExp(regex.source).exec(text);
+        return m ? toNumber(m) : null;
+      },
+    };
+  }
+
+  // Original text of a price element in the store currency, or null if it can't be confirmed.
+  // Another converter (e.g. a theme's built-in one) may already have rewritten the text; such
+  // converters keep the original in data-currency-<code>, so use that instead of guessing.
+  function baseTextOf(el, money, cfg) {
+    const text = el.textContent;
+    if (money.test(text) || parsePlainNumber(text) !== null) return text;
+    const cached = el.getAttribute(`data-currency-${cfg.baseCurrency.toLowerCase()}`);
+    if (cached) {
+      const cachedText = formatText(cached);
+      if (money.test(cachedText)) return cachedText;
+    }
+    return null;
   }
 
   function hasConvertedAncestor(node) {
@@ -197,35 +271,32 @@
 
   function rewritePrices(countryConfig, cfg) {
     const useBase = !countryConfig || countryConfig.currency_code === cfg.baseCurrency;
-    const money = moneyPattern(cfg);
-    const moneyTest = new RegExp(money.source);
-    const convertText = text => text.replace(money, (match, num) => {
-      const { price, currency } = convertAmount(parseMoneyNumber(num, cfg), cfg.baseCurrency, countryConfig, cfg);
+    const money = buildMoneyMatcher(cfg);
+    const convert = amount => {
+      const { price, currency } = convertAmount(amount, cfg.baseCurrency, countryConfig, cfg);
       return formatPrice(price, currency, cfg);
-    });
+    };
 
     document.querySelectorAll(PRICE_SELECTORS).forEach(el => {
       // Only rewrite innermost price elements so theme structure (sale/compare-at, hidden labels) survives.
       if (el.querySelector(PRICE_SELECTORS) || el.closest('#mc-currency-widget')) return;
+      // The theme updated this price (e.g. variant change): re-read it, but only if the new text is
+      // in the store currency. Text from another converter is ignored and our conversion re-applied.
       if (writtenText.has(el) && el.textContent !== writtenText.get(el)) {
-        originalText.delete(el);
-        delete el.dataset.mcOriginal;
+        const updated = el.textContent;
+        if (money.test(updated) || parsePlainNumber(updated) !== null) originalText.delete(el);
       }
       if (!originalText.has(el)) {
-        const original = parseShopifyPrice(el);
-        if (original === null || original === 0) return;
-        el.dataset.mcOriginal = Math.round(original * 100);
-        originalText.set(el, el.textContent);
+        const base = baseTextOf(el, money, cfg);
+        if (base === null) return;
+        const amount = money.amount(base) ?? parsePlainNumber(base);
+        if (!amount) return;
+        originalText.set(el, base);
       }
       const original = originalText.get(el);
       let next = original;
       if (!useBase) {
-        if (moneyTest.test(original)) {
-          next = convertText(original);
-        } else {
-          const { price, currency } = convertAmount(parseInt(el.dataset.mcOriginal, 10) / 100, cfg.baseCurrency, countryConfig, cfg);
-          next = formatPrice(price, currency, cfg);
-        }
+        next = money.test(original) ? money.replace(original, convert) : convert(parsePlainNumber(original));
       }
       // Writing text triggers the MutationObserver, so only write real changes.
       if (el.textContent !== next) el.textContent = next;
@@ -239,16 +310,21 @@
         if (!node.parentElement || node.parentElement.closest(SKIP_TEXT_IN) || hasConvertedAncestor(node)) {
           return NodeFilter.FILTER_REJECT;
         }
-        return originalNodeText.has(node) || moneyTest.test(node.nodeValue)
+        return originalNodeText.has(node) || money.test(node.nodeValue)
           ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
       },
     });
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(node => {
-      if (writtenNodeText.has(node) && node.nodeValue !== writtenNodeText.get(node)) originalNodeText.delete(node);
-      if (!originalNodeText.has(node)) originalNodeText.set(node, node.nodeValue);
+      if (writtenNodeText.has(node) && node.nodeValue !== writtenNodeText.get(node) && money.test(node.nodeValue)) {
+        originalNodeText.delete(node);
+      }
+      if (!originalNodeText.has(node)) {
+        if (!money.test(node.nodeValue)) return;
+        originalNodeText.set(node, node.nodeValue);
+      }
       const original = originalNodeText.get(node);
-      const next = useBase ? original : convertText(original);
+      const next = useBase ? original : money.replace(original, convert);
       // Text edits are characterData mutations, which the observer ignores, so this cannot loop.
       if (node.nodeValue !== next) node.nodeValue = next;
       writtenNodeText.set(node, next);
