@@ -4,10 +4,10 @@ import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  root: resolve(__dirname, 'client'),
+  root: resolve(import.meta.dirname, 'client'),
   base: '/admin/',
   build: {
-    outDir: resolve(__dirname, 'dist/client'),
+    outDir: resolve(import.meta.dirname, 'dist/client'),
     emptyOutDir: true,
   },
   server: {

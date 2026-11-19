@@ -28,6 +28,13 @@ function pgToSqlite(sql) {
     .replace(/\bNOW\(\)/gi, "datetime('now')");
 }
 
+// pg currently treats sslmode=require as verify-full (full certificate check) and warns that its
+// next major version will weaken it to libpq's "encrypt, don't verify". Ask for verify-full
+// explicitly: same behavior today, no warning, and no silent downgrade later.
+function strictSsl(url) {
+  return url.replace(/([?&]sslmode=)(prefer|require|verify-ca)\b/, '$1verify-full');
+}
+
 export async function initDb() {
   try {
     await connect();
@@ -44,7 +51,7 @@ export async function initDb() {
 async function connect() {
   if (process.env.DATABASE_URL) {
     pool = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: strictSsl(process.env.DATABASE_URL),
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
       max: 10,
       // Serverless Postgres (Neon) suspends when idle and drops open connections; release idle
