@@ -103,8 +103,19 @@ function sqliteGetAll(sql, params) {
   return rows;
 }
 
+// Mirror the pg result/error shape callers rely on: rowCount, and 23505 for unique violations.
 function sqliteExec(sql, params) {
   sqliteDb.run(pgToSqlite(sql), toSqliteParams(params));
+  return { rowCount: sqliteDb.getRowsModified() };
+}
+
+function withPgErrors(fn) {
+  try {
+    return fn();
+  } catch (err) {
+    if (/UNIQUE constraint failed/.test(err.message)) err.code = '23505';
+    throw err;
+  }
 }
 
 export async function dbGet(sql, params = []) {
@@ -112,7 +123,7 @@ export async function dbGet(sql, params = []) {
     const { rows } = await pool.query(sql, params);
     return rows[0] || null;
   }
-  return sqliteGetOne(sql, params);
+  return withPgErrors(() => sqliteGetOne(sql, params));
 }
 
 export async function dbAll(sql, params = []) {
@@ -120,12 +131,12 @@ export async function dbAll(sql, params = []) {
     const { rows } = await pool.query(sql, params);
     return rows;
   }
-  return sqliteGetAll(sql, params);
+  return withPgErrors(() => sqliteGetAll(sql, params));
 }
 
 export async function dbRun(sql, params = []) {
   if (pool) {
     return await pool.query(sql, params);
   }
-  sqliteExec(sql, params);
+  return withPgErrors(() => sqliteExec(sql, params));
 }

@@ -9,6 +9,21 @@ import { createHmac } from 'crypto';
 const BASE = 'http://localhost:3099';
 const TEST_SHOP = 'test-store.myshopify.com';
 let shopId = null;
+const API_KEY = process.env.SHOPIFY_API_KEY || 'testkey';
+const API_SECRET = process.env.SHOPIFY_API_SECRET || 'testsecret';
+
+// App Bridge session token (HS256 JWT signed with the app secret), as the embedded admin sends it.
+function sessionToken(shop = TEST_SHOP, overrides = {}, secret = API_SECRET) {
+  const now = Math.floor(Date.now() / 1000);
+  const enc = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const claims = {
+    iss: `https://${shop}/admin`, dest: `https://${shop}`, aud: API_KEY, sub: '1',
+    exp: now + 60, nbf: now - 1, iat: now - 1, jti: String(Math.random()), sid: 'test', ...overrides,
+  };
+  const unsigned = `${enc({ alg: 'HS256', typ: 'JWT' })}.${enc(claims)}`;
+  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+}
+const authHeaders = () => ({ Authorization: `Bearer ${sessionToken()}` });
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
@@ -34,7 +49,7 @@ async function test(name, fn) {
 
 async function get(path) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}shop=${TEST_SHOP}`;
-  const res = await fetch(url, { headers: { 'X-Shopify-Shop-Domain': TEST_SHOP } });
+  const res = await fetch(url, { headers: authHeaders() });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
@@ -42,7 +57,7 @@ async function post(path, body) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}shop=${TEST_SHOP}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Shop-Domain': TEST_SHOP },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -52,7 +67,7 @@ async function put(path, body) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}shop=${TEST_SHOP}`;
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Shop-Domain': TEST_SHOP },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -62,7 +77,7 @@ async function del(path) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}shop=${TEST_SHOP}`;
   const res = await fetch(url, {
     method: 'DELETE',
-    headers: { 'X-Shopify-Shop-Domain': TEST_SHOP },
+    headers: authHeaders(),
   });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
@@ -73,7 +88,7 @@ function signWebhook(body, secret) {
 
 async function webhook(topic, body, shopDomain = TEST_SHOP) {
   const rawBody = JSON.stringify(body);
-  const secret = process.env.SHOPIFY_API_SECRET || 'testsecret';
+  const secret = API_SECRET;
   const hmac = signWebhook(rawBody, secret);
   const res = await fetch(`${BASE}/api/webhooks/${topic}`, {
     method: 'POST',
@@ -94,7 +109,7 @@ async function seedTestShop() {
   const res = await fetch(`${BASE}/api/test/seed-shop`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ shop: TEST_SHOP, currency: 'USD' }),
+    body: JSON.stringify({ shop: TEST_SHOP, currency: 'USD', activePlan: true }),
   });
   if (!res.ok) throw new Error('Failed to seed test shop');
   const data = await res.json();
@@ -157,16 +172,14 @@ async function runAuthTests() {
     assert(res.status === 401, `expected 401, got ${res.status}`);
   });
 
-  await test('GET /api/auth/session for test shop → 200 with shop data', async () => {
-    const { status, body } = await get('/api/auth/session');
-    assert(status === 200, `expected 200, got ${status}: ${JSON.stringify(body)}`);
-    assert(body.shop?.shop_domain === TEST_SHOP, 'wrong shop domain');
-    assert(body.shop?.default_currency, 'missing default_currency');
+  await test('GET /api/auth/session with a shop param but no session token → 401', async () => {
+    const res = await fetch(`${BASE}/api/auth/session?shop=${TEST_SHOP}`);
+    assert(res.status === 401, `expected 401, got ${res.status}`);
   });
 
-  await test('GET /api/auth/install validates shop domain format', async () => {
-    const res = await fetch(`${BASE}/api/auth/install?shop=invalid-domain`);
-    assert(res.status === 400, `expected 400 for invalid domain, got ${res.status}`);
+  await test('Legacy OAuth install route is gone (managed install only)', async () => {
+    const res = await fetch(`${BASE}/api/auth/install?shop=${TEST_SHOP}`);
+    assert(res.status === 404, `expected 404, got ${res.status}`);
   });
 }
 
@@ -402,10 +415,10 @@ async function runBillingTests() {
     assert(annual.interval === 'ANNUAL', `annual interval wrong: ${annual.interval}`);
   });
 
-  await test('GET /api/billing/subscription returns null for new shop', async () => {
-    const { status } = await get('/api/billing/subscription');
-    // 200 with null subscription or 200 with live check failure — both ok
-    assert(status === 200, `expected 200, got ${status}`);
+  await test('GET /api/billing/subscription answers cleanly when Shopify is unreachable', async () => {
+    // The subscription is always read live from Shopify; the fake test shop can't be reached.
+    const { status, body } = await get('/api/billing/subscription');
+    assert(status === 200 || (status === 502 && body.error), `expected 200 or 502 with error, got ${status}`);
   });
 
   await test('POST /api/billing/subscribe invalid plan → 400', async () => {
@@ -474,13 +487,32 @@ async function runWebhookTests() {
 async function runSecurityTests() {
   console.log('\n📋 Security');
 
-  await test('Auth install rejects invalid shop format', async () => {
-    const r1 = await fetch(`${BASE}/api/auth/install?shop=javascript:alert(1)`);
-    assert(r1.status === 400, `expected 400 for JS injection, got ${r1.status}`);
-    const r2 = await fetch(`${BASE}/api/auth/install?shop=evil.shopify.com.attacker.com`);
-    assert(r2.status === 400, `expected 400 for spoofed domain, got ${r2.status}`);
-    const r3 = await fetch(`${BASE}/api/auth/install?shop=../../etc/passwd`);
-    assert(r3.status === 400, `expected 400 for path traversal, got ${r3.status}`);
+  const withToken = token => fetch(`${BASE}/api/countries`, { headers: { Authorization: `Bearer ${token}` } });
+
+  await test('Admin routes reject a session token signed with the wrong secret', async () => {
+    const res = await withToken(sessionToken(TEST_SHOP, {}, 'not-the-secret'));
+    assert(res.status === 401, `expected 401, got ${res.status}`);
+  });
+
+  await test('Admin routes reject an expired session token', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const res = await withToken(sessionToken(TEST_SHOP, { exp: now - 120, nbf: now - 300 }));
+    assert(res.status === 401, `expected 401, got ${res.status}`);
+  });
+
+  await test('Admin routes reject a session token for another app', async () => {
+    const res = await withToken(sessionToken(TEST_SHOP, { aud: 'someone-elses-key' }));
+    assert(res.status === 401, `expected 401, got ${res.status}`);
+  });
+
+  await test('Admin routes reject a token whose iss and dest shops differ', async () => {
+    const res = await withToken(sessionToken(TEST_SHOP, { iss: 'https://attacker.myshopify.com/admin' }));
+    assert(res.status === 401, `expected 401, got ${res.status}`);
+  });
+
+  await test('Admin routes ignore a spoofed shop header without a token', async () => {
+    const res = await fetch(`${BASE}/api/countries?shop=${TEST_SHOP}`, { headers: { 'X-Shopify-Shop-Domain': TEST_SHOP } });
+    assert(res.status === 401, `expected 401, got ${res.status}`);
   });
 
   await test('Admin routes reject requests without shop header', async () => {
@@ -488,9 +520,9 @@ async function runSecurityTests() {
     assert(res.status === 401, `expected 401, got ${res.status}`);
   });
 
-  await test('Admin routes reject unknown shop', async () => {
-    const res = await fetch(`${BASE}/api/countries?shop=not-installed.myshopify.com`, {
-      headers: { 'X-Shopify-Shop-Domain': 'not-installed.myshopify.com' },
+  await test('Admin routes reject a valid token for a shop that is not installed', async () => {
+    const res = await fetch(`${BASE}/api/countries`, {
+      headers: { Authorization: `Bearer ${sessionToken('not-installed.myshopify.com')}` },
     });
     assert(res.status === 401, `expected 401, got ${res.status}`);
   });

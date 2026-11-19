@@ -12,7 +12,7 @@
     "setup": "npm install && npm run build:client",
     "tunnel": "node scripts/tunnel.js",
     "dev:live": "concurrently \"npm run dev\" \"npm run tunnel\"",
-    "test:server": "cross-env NODE_ENV=test PORT=3099 DATABASE_URL=postgresql://localhost:5432/currency_test SHOPIFY_API_KEY=testkey SHOPIFY_API_SECRET=testsecret SCOPES=read_products HOST=http://localhost:3099 node server/index.js",
+    "test:server": "cross-env NODE_ENV=test PORT=3099 DATABASE_URL= SHOPIFY_API_KEY=testkey SHOPIFY_API_SECRET=testsecret SCOPES=read_products HOST=http://localhost:3099 node server/index.js",
     "test": "node tests/test.js",
     "test:all": "concurrently -k -s first \"npm run test:server\" \"npm run test\""
   },
