@@ -1,26 +1,19 @@
-databases:
-  - name: currency-db
-    plan: free
-    databaseName: currency_app
-    user: currency_user
-
+# Render blueprint for the app server (free web service).
+# The database is an external PostgreSQL (Neon free tier, no expiry): set DATABASE_URL to its
+# connection string in the Render dashboard. Render's own free PostgreSQL expires after 30 days.
 services:
   - type: web
-    name: multi-currency-converter
-    env: node
-    plan: starter
+    name: reda-currency-app
+    runtime: node
+    plan: free
     buildCommand: npm run setup
     startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000
       - key: DATABASE_URL
-        fromDatabase:
-          name: currency-db
-          property: connectionString
+        sync: false
       - key: SHOPIFY_API_KEY
         sync: false
       - key: SHOPIFY_API_SECRET
