@@ -103,7 +103,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString(), ...(req.query.hops === '1' && { xff: req.headers['x-forwarded-for'], remote: req.socket.remoteAddress }) }));
 
 // Privacy policy (publicly accessible — required for Shopify App Store)
 app.get('/privacy', (req, res) => {

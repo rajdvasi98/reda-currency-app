@@ -3,7 +3,7 @@
 # connection string in the Render dashboard. Render's own free PostgreSQL expires after 30 days.
 services:
   - type: web
-    name: reda-currency-app
+    name: multi-currency-app
     runtime: node
     plan: free
     buildCommand: npm run setup
