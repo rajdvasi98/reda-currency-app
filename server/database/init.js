@@ -32,7 +32,13 @@ export async function initDb() {
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
       max: 10,
+      // Serverless Postgres (Neon) suspends when idle and drops open connections; release idle
+      // clients early and allow time for a cold start.
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 20000,
     });
+    // Without a listener, a dropped idle connection emits an unhandled 'error' and kills the process.
+    pool.on('error', err => console.warn('[DB] Idle connection closed:', err.message));
     const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
     await pool.query(schema);
     await pool.query(`

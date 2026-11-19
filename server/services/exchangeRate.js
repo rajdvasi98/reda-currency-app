@@ -26,17 +26,23 @@ export async function fetchAndStoreRates(shopId, baseCurrency, { keepManual = fa
     }
   }
 
-  for (const [toCurrency, rate] of Object.entries(data.rates)) {
-    await dbRun(`
-      INSERT INTO exchange_rates (shop_id, from_currency, to_currency, rate, source, fetched_at)
-      VALUES ($1, $2, $3, $4, 'auto', NOW())
-      ON CONFLICT(shop_id, from_currency, to_currency) DO UPDATE SET
-        rate = excluded.rate, source = 'auto', fetched_at = NOW()
-      ${keepManual ? "WHERE exchange_rates.source <> 'manual'" : ''}
-    `, [shopId, baseCurrency, toCurrency, rate]);
-  }
+  // One statement for all pairs: a round trip per row is slow against a remote database.
+  const entries = Object.entries(data.rates).filter(([code, rate]) => /^[A-Z]{3}$/.test(code) && Number(rate) > 0);
+  if (!entries.length) return { success: false, error: 'No valid rates in response' };
+  const params = [shopId, baseCurrency];
+  const rows = entries.map(([toCurrency, rate]) => {
+    params.push(toCurrency, Number(rate));
+    return `($1, $2, $${params.length - 1}, $${params.length}, 'auto', NOW())`;
+  });
+  await dbRun(`
+    INSERT INTO exchange_rates (shop_id, from_currency, to_currency, rate, source, fetched_at)
+    VALUES ${rows.join(', ')}
+    ON CONFLICT(shop_id, from_currency, to_currency) DO UPDATE SET
+      rate = excluded.rate, source = 'auto', fetched_at = NOW()
+    ${keepManual ? "WHERE exchange_rates.source <> 'manual'" : ''}
+  `, params);
 
-  return { success: true, count: Object.keys(data.rates).length, base: baseCurrency };
+  return { success: true, count: entries.length, base: baseCurrency };
 }
 
 async function refreshDueShops() {
