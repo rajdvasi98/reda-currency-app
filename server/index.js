@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDb } from './database/init.js';
+import { initDb, isDbReady } from './database/init.js';
 import { validateShopDomain } from './middleware/hmac.js';
 import { startRateScheduler } from './services/exchangeRate.js';
 import authRoutes from './routes/auth.js';
@@ -72,6 +72,13 @@ app.use('/widget', (req, res, next) => {
 // Serve built admin UI
 app.use('/admin', express.static(join(__dirname, '../dist/client')));
 
+// Until the database is reachable, API calls get a retryable 503 instead of failing mid-request.
+// Shopify retries webhooks; the storefront widget and the admin handle the error and retry.
+app.use('/api', (req, res, next) => {
+  if (isDbReady()) return next();
+  res.set('Retry-After', '30').status(503).json({ error: 'The app is starting up. Please try again in a moment.' });
+});
+
 // Webhooks (raw body needed — registered before JSON middleware)
 app.use('/api/webhooks', webhookRoutes);
 
@@ -103,7 +110,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString(), ...(req.query.hops === '1' && { xff: req.headers['x-forwarded-for'], remote: req.socket.remoteAddress }) }));
+app.get('/health', (req, res) => res.json({ status: 'ok', db: isDbReady() ? 'ok' : 'unavailable', version: '1.0.0', timestamp: new Date().toISOString(), ...(req.query.hops === '1' && { xff: req.headers['x-forwarded-for'], remote: req.socket.remoteAddress }) }));
 
 // Privacy policy (publicly accessible — required for Shopify App Store)
 app.get('/privacy', (req, res) => {
@@ -210,18 +217,23 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-async function start() {
-  await initDb();
-  app.listen(PORT, () => {
-    console.log(`\n Multi Currency Converter v1.0.0`);
-    console.log(`   Port:   ${PORT}`);
-    console.log(`   Public: ${HOST}`);
-    console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
-  });
-  startRateScheduler();
+// Serve HTTP right away and keep retrying the database: a database outage must not take down
+// the whole service (a crash-restart loop also takes /health and the storefront with it).
+async function connectDb(attempt = 1) {
+  try {
+    await initDb();
+    startRateScheduler();
+  } catch (err) {
+    const delay = Math.min(60, 5 * attempt);
+    console.error(`[DB] Connection failed (attempt ${attempt}): ${err.message}. Retrying in ${delay}s`);
+    setTimeout(() => connectDb(attempt + 1), delay * 1000);
+  }
 }
 
-start().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`\n Multi Currency Converter v1.0.0`);
+  console.log(`   Port:   ${PORT}`);
+  console.log(`   Public: ${HOST}`);
+  console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
+  connectDb();
 });

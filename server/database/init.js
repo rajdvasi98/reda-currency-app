@@ -8,8 +8,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let pool = null;
 let sqliteDb = null;
+let ready = false;
 
 export function getPool() { return pool; }
+export function isDbReady() { return ready; }
 
 // PostgreSQL returns Date objects; SQLite returns 'YYYY-MM-DD HH:MM:SS' text in UTC.
 export function parseDbTime(value) {
@@ -27,6 +29,19 @@ function pgToSqlite(sql) {
 }
 
 export async function initDb() {
+  try {
+    await connect();
+    ready = true;
+  } catch (err) {
+    // Leave no half-open pool behind so the next attempt starts clean.
+    if (pool) await pool.end().catch(() => {});
+    pool = null;
+    sqliteDb = null;
+    throw err;
+  }
+}
+
+async function connect() {
   if (process.env.DATABASE_URL) {
     pool = new pg.Pool({
       connectionString: process.env.DATABASE_URL,
