@@ -26,7 +26,10 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || `http://localhost:${PORT}`;
 
 const app = express();
-app.set('trust proxy', true);
+// Render chain (measured): client -> Cloudflare -> Render edge (10.x) -> local proxy -> app.
+// Trust exactly those 3 hops so req.ip is the real client and a forged X-Forwarded-For is ignored
+// ("true" let anyone pick their IP and dodge the API rate limit).
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 3 : 'loopback');
 
 // Webhook routes get raw body (Buffer) for HMAC verification; all others get JSON.
 app.use('/api/webhooks', express.raw({ type: 'application/json', limit: '1mb' }));
@@ -110,7 +113,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', db: isDbReady() ? 'ok' : 'unavailable', version: '1.0.0', timestamp: new Date().toISOString(), ...(req.query.hops === '1' && { xff: req.headers['x-forwarded-for'], remote: req.socket.remoteAddress }) }));
+app.get('/health', (req, res) => res.json({ status: 'ok', db: isDbReady() ? 'ok' : 'unavailable', version: '1.0.0', timestamp: new Date().toISOString() }));
 
 // Privacy policy (publicly accessible — required for Shopify App Store)
 app.get('/privacy', (req, res) => {
